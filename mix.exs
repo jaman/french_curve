@@ -77,7 +77,7 @@ defmodule FrenchCurve.MixProject do
       {:ex_doc, "~> 0.34", only: :dev, runtime: false},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
-      {:plumb, "~> 0.1", only: :dev, runtime: false}
+      {:plumb, "~> 0.2", only: :dev, runtime: false}
     ]
   end
 end
