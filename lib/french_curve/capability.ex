@@ -2,19 +2,29 @@ defmodule FrenchCurve.Capability do
   @moduledoc """
   Chooses a graphics protocol from the environment and maps it to a backend module.
 
-  Detection reads `KITTY_WINDOW_ID`, `TERM`, `TERM_PROGRAM` and `KONSOLE_VERSION`. The first matching rule wins, in this order:
+  Detection reads `KITTY_WINDOW_ID`, `TERM`, `TERM_PROGRAM`, `WEZTERM_PANE`, `LC_TERMINAL` and
+  `KONSOLE_VERSION`. A variable exported empty counts as unset. The first matching rule wins,
+  in this order:
 
   | environment | protocol |
   |---|---|
   | `KITTY_WINDOW_ID` set | `:kitty` |
   | `TERM` contains `kitty` or `ghostty` | `:kitty` |
   | `TERM_PROGRAM` is `WezTerm` | `:kitty` |
+  | `WEZTERM_PANE` set | `:kitty` |
   | `TERM_PROGRAM` is `iTerm.app` | `:iterm2` |
+  | `LC_TERMINAL` is `iTerm2` | `:iterm2` |
   | `KONSOLE_VERSION` set | `:sixel` |
   | `TERM` contains `foot` or `mlterm` | `:sixel` |
   | anything else | `:braille` |
 
   `:braille` is the fallback because it needs no graphics support at all.
+
+  `WEZTERM_PANE` and `LC_TERMINAL` cover terminals whose `TERM_PROGRAM` did not survive the
+  trip: multiplexers drop it, and ssh forwards only the variables its client is configured to
+  send, which for iTerm2 is `LC_TERMINAL` under the usual `SendEnv LC_*`. Detecting a remote
+  client therefore means passing that session's environment to `detect/1`, not the
+  environment of the host the program runs on.
 
   A terminal detected as `:kitty` does not necessarily speak all of the protocol — ask
   `placements?/1` before storing an image under an id and placing it.
@@ -72,23 +82,27 @@ defmodule FrenchCurve.Capability do
       iex> FrenchCurve.Capability.detect(%{"TERM" => "xterm-kitty"})
       :kitty
   """
+  @rules [
+    {:set, "KITTY_WINDOW_ID", :kitty},
+    {:term, "kitty", :kitty},
+    {:term, "ghostty", :kitty},
+    {:equals, "TERM_PROGRAM", "WezTerm", :kitty},
+    {:set, "WEZTERM_PANE", :kitty},
+    {:equals, "TERM_PROGRAM", "iTerm.app", :iterm2},
+    {:equals, "LC_TERMINAL", "iTerm2", :iterm2},
+    {:set, "KONSOLE_VERSION", :sixel},
+    {:term, "foot", :sixel},
+    {:term, "mlterm", :sixel}
+  ]
+
   @spec detect(map) :: atom
   def detect(env) when is_map(env) do
-    Enum.find_value(matchers(), :braille, & &1.(env))
+    Enum.find_value(@rules, :braille, &matched(&1, env))
   end
 
-  defp matchers do
-    [
-      fn env -> env["KITTY_WINDOW_ID"] && :kitty end,
-      fn env -> term_contains?(env, "kitty") && :kitty end,
-      fn env -> term_contains?(env, "ghostty") && :kitty end,
-      fn env -> env["TERM_PROGRAM"] == "WezTerm" && :kitty end,
-      fn env -> env["TERM_PROGRAM"] == "iTerm.app" && :iterm2 end,
-      fn env -> env["KONSOLE_VERSION"] && :sixel end,
-      fn env -> term_contains?(env, "foot") && :sixel end,
-      fn env -> term_contains?(env, "mlterm") && :sixel end
-    ]
-  end
+  defp matched({:set, name, protocol}, env), do: set?(env, name) && protocol
+  defp matched({:term, needle, protocol}, env), do: term_contains?(env, needle) && protocol
+  defp matched({:equals, name, value, protocol}, env), do: env[name] == value && protocol
 
   @doc """
   Whether this terminal keeps images under an id and draws them again by placement.
@@ -131,6 +145,8 @@ defmodule FrenchCurve.Capability do
   defp term_contains?(env, needle) do
     String.contains?(env["TERM"] || "", needle)
   end
+
+  defp set?(env, name), do: env[name] not in [nil, ""]
 
   # Terminals that answer to the kitty protocol without keeping images under an id. Nothing is
   # here today — iTerm was, and is now detected as :iterm2 instead — but the question is real

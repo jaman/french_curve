@@ -51,6 +51,28 @@ defmodule FrenchCurve.CapabilityTest do
       assert Capability.detect(%{"TERM" => "xterm-256color"}) == :braille
       assert Capability.detect(%{}) == :braille
     end
+
+    test "wezterm is recognised by its pane id when TERM_PROGRAM is stripped" do
+      assert Capability.detect(%{"WEZTERM_PANE" => "0"}) == :kitty
+      assert Capability.detect(%{"TERM" => "xterm-256color", "WEZTERM_PANE" => "3"}) == :kitty
+    end
+
+    test "iterm is recognised over ssh by the locale variable it forwards" do
+      assert Capability.detect(%{"LC_TERMINAL" => "iTerm2"}) == :iterm2
+
+      assert Capability.detect(%{"TERM" => "xterm-256color", "LC_TERMINAL" => "iTerm2"}) ==
+               :iterm2
+    end
+
+    test "another terminal's LC_TERMINAL is not iterm" do
+      assert Capability.detect(%{"LC_TERMINAL" => "Alacritty"}) == :braille
+    end
+
+    test "a variable exported empty counts as unset" do
+      assert Capability.detect(%{"KITTY_WINDOW_ID" => ""}) == :braille
+      assert Capability.detect(%{"KONSOLE_VERSION" => ""}) == :braille
+      assert Capability.detect(%{"WEZTERM_PANE" => ""}) == :braille
+    end
   end
 
   describe "backend/1" do

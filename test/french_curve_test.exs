@@ -66,7 +66,7 @@ defmodule FrenchCurveTest do
 
       case FrenchCurve.Capability.detect() do
         :braille -> assert detected == nil
-        _pixels -> assert {paint, _clear, _place} = detected, "got #{inspect(paint = detected)}"
+        _pixels -> assert {_paint, _clear, _place} = detected, "got #{inspect(detected)}"
       end
     end
 
