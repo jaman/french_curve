@@ -96,9 +96,6 @@ defmodule FrenchCurve do
 
       {clear <> Kitty.transmit(raster, image, compress: compress?) <> place, clear, place}
     else
-      # Named even though it is drawn in one command, so that `clear` can take it off again.
-      # A kitty image is an overlay, not cells: nothing else removes it, and an unnamed one
-      # would still be on the screen after the program exits.
       clear = Kitty.delete(id: image)
 
       paint =

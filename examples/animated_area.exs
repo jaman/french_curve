@@ -6,6 +6,7 @@ defmodule AnimatedArea do
   @default_frames 160
   @fps 24
   @protocols [:braille, :kitty, :sixel, :iterm2]
+  @region :area_chart
 
   def run([]), do: animate(:braille, @default_frames)
 
@@ -23,28 +24,38 @@ defmodule AnimatedArea do
 
   defp protocol_names, do: Enum.map(@protocols, &Atom.to_string/1)
 
+  defp animate(_protocol, frames) when frames < 1, do: :ok
+
   defp animate(protocol, frames) do
     IO.write("\e[2J\e[?25l")
+    clear = draw(protocol, 0)
 
     try do
-      Enum.each(0..(frames - 1)//1, fn frame -> draw(protocol, frame) end)
+      Enum.each(1..(frames - 1)//1, &draw(protocol, &1))
     after
-      IO.write(reset(protocol) <> "\e[?25h")
+      IO.write(clear <> "\e[2J\e[H\e[?25h")
     end
   end
 
-  defp draw(protocol, frame) do
-    body = FrenchCurve.to_terminal(raster(frame), protocol, [])
-    IO.write(clear(protocol) <> body)
+  defp draw(protocol, index) do
+    raster = raster(index)
+    IO.write("\e[H")
+
+    clear = paint(FrenchCurve.frame(raster, @region, protocol: protocol), raster, protocol)
+
     Process.sleep(div(1000, @fps))
+    clear
   end
 
-  defp clear(:braille), do: "\e[H"
-  defp clear(:kitty), do: "\e_Ga=d\e\\\e[H"
-  defp clear(_protocol), do: "\e[2J\e[H"
+  defp paint(nil, raster, protocol) do
+    IO.write(FrenchCurve.to_terminal(raster, protocol))
+    ""
+  end
 
-  defp reset(:kitty), do: "\e_Ga=d\e\\\e[2J\e[H"
-  defp reset(_protocol), do: "\e[2J\e[H"
+  defp paint({paint, clear, _place}, _raster, _protocol) do
+    IO.write(paint)
+    clear
+  end
 
   defp raster(frame) do
     phase = frame * 0.18

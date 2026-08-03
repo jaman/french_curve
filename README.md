@@ -4,6 +4,21 @@ Pure-Elixir terminal graphics for **generating** visualizations — charts, grap
 lines — and emitting them through whichever image protocol the terminal supports.
 No native dependencies, no image decoding (you draw the pixels), no supervision tree.
 
+[![Hex.pm](https://img.shields.io/hexpm/v/french_curve.svg)](https://hex.pm/packages/french_curve)
+[![Docs](https://img.shields.io/badge/hex-docs-blue.svg)](https://hexdocs.pm/french_curve)
+
+## Installation
+
+```elixir
+def deps do
+  [
+    {:french_curve, "~> 0.1"}
+  ]
+end
+```
+
+Nothing to start and nothing to configure — every module is a pure function over values.
+
 ## Pipeline
 
 ```
@@ -69,12 +84,40 @@ mix run examples/animated_area.exs sixel 40  # pixel backend, N frames then stop
 
 `to_terminal/3` returns a printable binary for any backend (braille cells are
 converted to ANSI; pixel backends pass through), so swapping backends needs no
-other change. The per-frame *repaint* does differ: text (braille) overwrites in
-place with cursor-home, while image protocols clear the previous frame first
-(kitty needs an explicit delete) — see `examples/animated_area.exs`.
+other change.
 
 `braille` renders in any terminal; `kitty`/`sixel`/`iterm2` only display where the
 terminal supports that protocol (elsewhere you'll see raw escape bytes).
+
+## Redrawing a region
+
+A picture drawn once is `to_terminal/3`. A region drawn over and over — a meter, a scope,
+anything animated — is `FrenchCurve.frame/3`, which returns `{paint, clear, place}`:
+
+```elixir
+{paint, clear, place} = FrenchCurve.frame(raster, :meter, fit: {40, 8})
+
+IO.write(paint)              # draw it
+IO.write(place || paint)     # draw it again without resending the pixels
+IO.write(clear)              # take it off
+```
+
+`id` (`:meter` above) names the region across frames — any term, hashed to a protocol image
+id — so each frame replaces the last instead of piling up. `place` is `nil` where the
+protocol has no stored image, and redrawing then means sending `paint` again. `frame/3`
+returns `nil` outright for `:braille`, which is the caller's cue to draw text.
+
+Two things it settles that a caller cannot see from `Capability.detect/0`. First, a kitty
+terminal may or may not implement stored images and placements, and one that does not draws
+*nothing* when sent a store followed by a placement — `frame/3` asks `Capability.placements?/0`
+and picks the dialect. Second, the image is always **named**, so `clear` really removes it: a
+kitty image is an overlay rather than cells, so text drawn over it does not rub it out and
+leaving the alternate screen does not discard it. An unnamed one cannot be taken off at all,
+and is still on the screen after the program has exited.
+
+Positioning stays the host's job either way: `frame/3` draws at the cursor, so put the
+cursor where you want the region first. `examples/animated_area.exs` does exactly this —
+cursor-home, then `paint` — across all four protocols.
 
 ## Embedding in a host application (a sub-region)
 
@@ -193,7 +236,36 @@ follows the picture, not the protocol.
 
 ## Capability detection
 
-`FrenchCurve.Capability.detect/0` picks a backend from environment variables
-(`KITTY_WINDOW_ID`, `TERM`, `TERM_PROGRAM`, `KONSOLE_VERSION`), preferring
-`kitty > sixel > iterm2 > braille`, and caches the result in `:persistent_term`.
-Pass an explicit `protocol:` to override.
+`FrenchCurve.Capability.detect/0` picks a protocol from `KITTY_WINDOW_ID`, `TERM`,
+`TERM_PROGRAM`, `WEZTERM_PANE`, `LC_TERMINAL` and `KONSOLE_VERSION`, preferring
+`kitty > iterm2 > sixel > braille`, and caches the result in `:persistent_term` for the
+life of the VM. `detect/1` takes an environment map instead and does not cache — that is
+the one to use for an ssh or multiplexer session, whose environment is not the host's.
+Pass an explicit `protocol:` to override either.
+
+iTerm is deliberately **not** detected as `:kitty` even though it understands kitty's
+transmit-and-display: a kitty image is an overlay rather than cells, and removing one takes
+an explicit delete addressed to its id, which iTerm does not implement. Its own inline-image
+protocol scrolls and disappears with the screen, like text.
+
+### Asking the terminal instead
+
+Environment variables are a guess. `Capability.probe/0` returns the bytes that ask the
+terminal directly (XTVERSION plus primary device attributes); write them, read until
+`probe_complete?/1` is true or your timeout expires, then hand the replies to
+`from_probe/1`:
+
+```elixir
+replies = read_until(&FrenchCurve.Capability.probe_complete?/1, IO.write(FrenchCurve.Capability.probe()))
+
+protocol = FrenchCurve.Capability.from_probe(replies) || FrenchCurve.Capability.detect()
+```
+
+`from_probe/1` returns `nil` when the replies name nothing usable, and a terminal that
+answers neither query says nothing at all — so the caller owns the timeout, exactly as it
+owns the tty.
+
+`Capability.placements?/0` is a separate question from the protocol: a terminal can speak
+kitty's transmit-and-display without keeping images under an id, and sending such a
+terminal a store followed by a placement draws nothing at all. `FrenchCurve.frame/3` asks
+this for you.

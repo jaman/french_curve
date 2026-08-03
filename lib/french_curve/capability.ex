@@ -216,6 +216,11 @@ defmodule FrenchCurve.Capability do
   @spec placements?() :: boolean
   def placements?, do: placements?(System.get_env())
 
+  @doc """
+  Whether the terminal described by `env` keeps images under an id and places them.
+
+  As `placements?/0`, against a given environment map rather than the OS one. Uncached.
+  """
   @spec placements?(map) :: boolean
   def placements?(env) when is_map(env), do: detect(env) == :kitty and not partial_kitty?(env)
 
@@ -238,8 +243,5 @@ defmodule FrenchCurve.Capability do
 
   defp set?(env, name), do: env[name] not in [nil, ""]
 
-  # Terminals that answer to the kitty protocol without keeping images under an id. Nothing is
-  # here today — iTerm was, and is now detected as :iterm2 instead — but the question is real
-  # and this is where the answer goes.
   defp partial_kitty?(_env), do: false
 end
