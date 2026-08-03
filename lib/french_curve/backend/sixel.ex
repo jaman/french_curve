@@ -1,5 +1,19 @@
 defmodule FrenchCurve.Backend.Sixel do
-  @moduledoc false
+  @moduledoc """
+  Renders a raster as a sixel image, a palette-indexed DCS sequence.
+
+  Sixel encodes six vertical pixels per character, so the image is written as horizontal
+  bands six pixels tall, one pass per colour used in the band, run-length compressed.
+
+  The format is indexed, not truecolour: the image is limited to 256 colours. Rasters with
+  more are quantized by dropping low bits from each channel, as many as it takes to fit.
+
+  Sixel has no alpha. Pixels below the alpha threshold are left unwritten and show
+  whatever the terminal already had there, unless `:background` names a colour to paint
+  them instead.
+
+      IO.write(FrenchCurve.Backend.Sixel.render(raster, background: {0, 0, 0}))
+  """
 
   import Bitwise
 
@@ -9,6 +23,16 @@ defmodule FrenchCurve.Backend.Sixel do
   @sixel_base 0x3F
   @max_colors 256
 
+  @doc """
+  Returns the DCS sequence that draws `raster` at the cursor.
+
+  ## Options
+
+    * `:alpha_threshold` — the smallest alpha treated as an opaque pixel, default `1`.
+      Pixels below it are transparent.
+    * `:background` — an `{r, g, b}` tuple painted behind transparent pixels. Omitted by
+      default, which leaves those pixels unwritten.
+  """
   @spec render(Raster.t(), keyword) :: binary
   def render(%Raster{} = raster, opts \\ []) do
     threshold = Keyword.get(opts, :alpha_threshold, 1)

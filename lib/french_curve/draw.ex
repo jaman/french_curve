@@ -1,15 +1,38 @@
 defmodule FrenchCurve.Draw do
-  @moduledoc false
+  @moduledoc """
+  Rasterises lines, rectangles and circles into a `FrenchCurve.Raster`.
+
+  Every function takes a raster as its first argument and returns a new one, so calls
+  compose in a pipeline. Coordinates are integer pixels, `{0, 0}` at the top left, and may
+  fall outside the raster: the parts that land inside are drawn and the rest is clipped.
+  Colours are `{r, g, b, a}` byte tuples written opaquely, with no blending against what
+  is already there.
+
+      FrenchCurve.Raster.new(40, 20)
+      |> FrenchCurve.Draw.rect({0, 0}, {39, 19}, {80, 80, 80, 255})
+      |> FrenchCurve.Draw.fill_circle({20, 10}, 6, {255, 0, 0, 255})
+  """
 
   alias FrenchCurve.Raster
 
   @type coord :: {integer, integer}
 
+  @doc """
+  Draws a one-pixel-wide line between the two endpoints, both inclusive.
+
+  Handles any direction, including purely horizontal, vertical and single-point lines.
+  """
   @spec line(Raster.t(), coord, coord, Raster.color()) :: Raster.t()
   def line(%Raster{} = raster, {x0, y0}, {x1, y1}, color) do
     plot_line(raster, x0, y0, x1, y1, color)
   end
 
+  @doc """
+  Draws a connected run of line segments through `points` in order.
+
+  A single point plots that pixel and an empty list leaves the raster unchanged. Points
+  are not closed back to the first one; pass the first point again to close the shape.
+  """
   @spec polyline(Raster.t(), [coord], Raster.color()) :: Raster.t()
   def polyline(%Raster{} = raster, [point], color) do
     {x, y} = point
@@ -24,6 +47,11 @@ defmodule FrenchCurve.Draw do
 
   def polyline(%Raster{} = raster, [], _color), do: raster
 
+  @doc """
+  Draws the four edges of the rectangle spanned by two opposite corners.
+
+  Both corners are inclusive and may be given in any order. The interior is untouched.
+  """
   @spec rect(Raster.t(), coord, coord, Raster.color()) :: Raster.t()
   def rect(%Raster{} = raster, {x0, y0}, {x1, y1}, color) do
     {left, right} = min_max(x0, x1)
@@ -36,6 +64,11 @@ defmodule FrenchCurve.Draw do
     |> line({right, top}, {right, bottom}, color)
   end
 
+  @doc """
+  Fills every pixel of the rectangle spanned by two opposite corners, edges included.
+
+  Both corners are inclusive and may be given in any order.
+  """
   @spec fill_rect(Raster.t(), coord, coord, Raster.color()) :: Raster.t()
   def fill_rect(%Raster{} = raster, {x0, y0}, {x1, y1}, color) do
     {left, right} = min_max(x0, x1)
@@ -46,11 +79,21 @@ defmodule FrenchCurve.Draw do
     end
   end
 
+  @doc """
+  Draws a one-pixel-wide circle outline of `radius` pixels around the centre `{cx, cy}`.
+
+  `radius` must be a non-negative integer. The interior is untouched.
+  """
   @spec circle(Raster.t(), coord, non_neg_integer, Raster.color()) :: Raster.t()
   def circle(%Raster{} = raster, {cx, cy}, radius, color) do
     plot_circle(raster, cx, cy, radius, 0, radius, 1 - radius, color)
   end
 
+  @doc """
+  Fills a disc of `radius` pixels around the centre `{cx, cy}`.
+
+  `radius` must be a non-negative integer.
+  """
   @spec fill_circle(Raster.t(), coord, non_neg_integer, Raster.color()) :: Raster.t()
   def fill_circle(%Raster{} = raster, {cx, cy}, radius, color) do
     Enum.reduce(-radius..radius//1, raster, fn dy, acc ->

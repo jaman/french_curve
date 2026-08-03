@@ -1,11 +1,42 @@
 defmodule FrenchCurve.Chart do
-  @moduledoc false
+  @moduledoc """
+  Plots a series of numbers as a line or filled-area chart on a `FrenchCurve.Raster`.
+
+  Both functions take a flat list of values and lay them out evenly across the raster's
+  width, scaling them to its height. There are no axes, labels or gridlines: the result is
+  the plotted series and nothing else, ready to hand to `FrenchCurve.render/3`.
+
+  Values map to pixels so that the first sits at `x = 0` and the last at `x = width - 1`,
+  and the data minimum sits at the bottom row with the maximum at the top. A series whose
+  values are all equal is drawn along the bottom.
+
+      [3, 1, 4, 1, 5, 9, 2, 6]
+      |> FrenchCurve.Chart.area(width: 120, height: 40, smooth: true)
+      |> FrenchCurve.to_terminal(:kitty)
+  """
 
   alias FrenchCurve.{Curve, Draw, Raster}
 
   @default_color {255, 255, 255, 255}
   @default_fill_opacity 0.4
 
+  @doc """
+  Plots `values` as a polyline.
+
+  An empty list returns a blank raster of the requested size.
+
+  ## Options
+
+    * `:width` — raster width in pixels, default `80`
+    * `:height` — raster height in pixels, default `24`
+    * `:color` — the line's `t:FrenchCurve.Raster.color/0`, default `{255, 255, 255, 255}`
+    * `:background` — raster background colour, default transparent
+    * `:min` — value pinned to the bottom row, default the smallest of `values`
+    * `:max` — value pinned to the top row, default the largest of `values`
+    * `:smooth` — interpolate a Catmull-Rom spline through the points, default `false`
+
+  Values outside `:min`/`:max` are plotted off the raster and clipped away.
+  """
   @spec line([number], keyword) :: Raster.t()
   def line(values, opts \\ [])
 
@@ -19,6 +50,17 @@ defmodule FrenchCurve.Chart do
     Draw.polyline(new_raster(opts), Curve.to_pixels(points), color)
   end
 
+  @doc """
+  Plots `values` as a polyline with the space beneath it filled down to the bottom row.
+
+  An empty list returns a blank raster of the requested size.
+
+  Takes every option of `line/2`, plus:
+
+    * `:fill_opacity` — factor applied to the red, green and blue channels of `:color` to
+      get the fill colour, default `0.4`. The alpha channel is copied unchanged, so the
+      fill is a darkened `:color` at the same opacity rather than a translucent one.
+  """
   @spec area([number], keyword) :: Raster.t()
   def area(values, opts \\ [])
 

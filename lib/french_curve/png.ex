@@ -1,8 +1,25 @@
 defmodule FrenchCurve.Png do
-  @moduledoc false
+  @moduledoc """
+  Encodes raw RGBA pixels as a PNG.
+
+  Only what `FrenchCurve.Backend.Iterm2` needs to wrap a raster in the one image format
+  iTerm2's inline-image protocol accepts. Encoding only; there is no decoder.
+
+      png = FrenchCurve.Png.encode(width, height, FrenchCurve.Raster.to_rgba_binary(raster))
+  """
 
   @signature <<137, 80, 78, 71, 13, 10, 26, 10>>
 
+  @doc """
+  Encodes a dense RGBA buffer as a complete PNG binary.
+
+  `rgba` must be exactly `width * height * 4` bytes, four bytes per pixel in red, green,
+  blue, alpha order and rows top to bottom; a mismatched size raises `FunctionClauseError`,
+  as do non-positive dimensions.
+
+  The result is an 8-bit-per-channel truecolour-with-alpha PNG whose scanlines all use
+  filter type 0 and whose pixel data sits in a single zlib-compressed `IDAT` chunk.
+  """
   @spec encode(pos_integer, pos_integer, binary) :: binary
   def encode(width, height, rgba)
       when is_integer(width) and width > 0 and is_integer(height) and height > 0 and

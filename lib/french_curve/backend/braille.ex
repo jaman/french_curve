@@ -1,5 +1,20 @@
 defmodule FrenchCurve.Backend.Braille do
-  @moduledoc false
+  @moduledoc """
+  Renders a raster as braille characters, for terminals with no graphics protocol at all.
+
+  Each braille character carries eight dots in a 2-wide by 4-tall grid, so one cell stands
+  in for a 2-by-4 block of pixels and a raster comes out at `ceil(width / 2)` columns by
+  `ceil(height / 4)` rows. A pixel is a lit dot when its alpha reaches the threshold;
+  colour is per character, averaged over that cell's lit pixels, so detail below one cell
+  survives in shape but not in colour.
+
+  `render/2` returns cell rows and `to_ansi/1` or `to_text/1` turn those into a string.
+
+      raster
+      |> FrenchCurve.Backend.Braille.render()
+      |> FrenchCurve.Backend.Braille.to_ansi()
+      |> IO.puts()
+  """
 
   import Bitwise
 
@@ -17,8 +32,24 @@ defmodule FrenchCurve.Backend.Braille do
     {1, 3} => 0x80
   }
 
+  @typedoc """
+  One character cell: the braille grapheme, and the average RGB of its lit pixels or `nil`
+  when no pixel in the cell was lit.
+  """
   @type cell :: {binary, Raster.color_rgb() | nil}
 
+  @doc """
+  Renders `raster` as rows of `t:cell/0`, top row first.
+
+  Returns `ceil(height / 4)` rows of `ceil(width / 2)` cells. Cells at the right and
+  bottom edges read pixels past the raster bounds, which come back as the background and
+  so are lit only if the background itself passes the threshold.
+
+  ## Options
+
+    * `:alpha_threshold` — the smallest alpha counted as a lit dot, default `1`. Raise it
+      to drop faint pixels; `0` lights every pixel including fully transparent ones.
+  """
   @spec render(Raster.t(), keyword) :: [[cell]]
   def render(%Raster{} = raster, opts \\ []) do
     threshold = Keyword.get(opts, :alpha_threshold, 1)
@@ -33,6 +64,11 @@ defmodule FrenchCurve.Backend.Braille do
     end
   end
 
+  @doc """
+  Flattens cell rows to one uncoloured string per row, dropping the colours.
+
+  Returns a list of binaries, one per row, each of braille characters only.
+  """
   @spec to_text([[cell]]) :: [binary]
   def to_text(rows) do
     Enum.map(rows, fn row ->
@@ -40,6 +76,13 @@ defmodule FrenchCurve.Backend.Braille do
     end)
   end
 
+  @doc """
+  Flattens cell rows to a single newline-separated string with 24-bit colour.
+
+  Each coloured cell is wrapped in a truecolour foreground sequence and reset immediately
+  after, so the string leaves no styling behind. Cells with no lit pixels are emitted bare.
+  Rows are joined with `\\n` and there is no trailing newline.
+  """
   @spec to_ansi([[cell]]) :: binary
   def to_ansi(rows) do
     Enum.map_join(rows, "\n", fn row -> Enum.map_join(row, "", &cell_to_ansi/1) end)

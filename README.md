@@ -164,6 +164,33 @@ tree = w |> Raster.from_rgba(h, rgba) |> Sprite.new()
 ```
 
 
+## Compression (kitty)
+
+`compress: true` deflates the pixels before base64 and tells the terminal with `o=z`:
+
+```elixir
+FrenchCurve.render(raster, :kitty, compress: true, fit: {cols, rows})
+FrenchCurve.Backend.Kitty.transmit(raster, id, compress: true)
+FrenchCurve.Sprite.upload(sprite, :kitty, compress: true)
+```
+
+Off by default: the protocol's compression is optional, so a partial implementation may not
+have it. Turn it on when you know what you are drawing to.
+
+It matters because of what image data usually *is* here. Anything drawn rather than
+photographed — a chart, a tilemap, a sprite sheet — is enormously repetitive, and that is the
+case zlib is best at. Measured on a 640×384 tilemap frame:
+
+| | payload | deflate |
+|---|---|---|
+| uncompressed | 1,310,720 B | — |
+| `compress: true` | 4,160 B | ~1 ms |
+
+315× smaller for about a millisecond. The saving is not only bandwidth: the payload is chunked
+into 4 KiB pieces that each carry their own escape sequence, so it is also 315× fewer chunks to
+build and for the terminal to reassemble. A photograph would compress far less; the ratio
+follows the picture, not the protocol.
+
 ## Capability detection
 
 `FrenchCurve.Capability.detect/0` picks a backend from environment variables
