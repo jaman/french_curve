@@ -23,10 +23,35 @@ defmodule FrenchCurveTest do
       {paint, clear, place} = frame(protocol: :kitty, placements: false, fit: {8, 2})
 
       assert paint =~ "a=T"
-      refute paint =~ "a=t,", "storing would leave iTerm holding a picture it never shows"
+      refute paint =~ "a=t,", "storing would leave the terminal holding a picture it never shows"
       refute paint =~ "a=p", "and it does not understand a placement"
-      assert clear == ""
       assert place == nil, "so redrawing means sending the picture again"
+
+      assert clear =~ "a=d", "but it must still be removable"
+    end
+
+    test "the one-shot image is named, so it can be taken off the screen again" do
+      {paint, clear, _place} = frame(protocol: :kitty, placements: false)
+      id = FrenchCurve.image_id(:region)
+
+      assert paint =~ "i=#{id}", "an unnamed overlay could never be deleted"
+      assert clear =~ "i=#{id}", "and the delete has to name the same one"
+    end
+
+    test "each frame deletes the one before it rather than stacking overlays" do
+      {paint, clear, _place} = frame(protocol: :kitty, placements: false)
+
+      assert String.starts_with?(paint, clear),
+             "an overlay is not cells, so the old one has to go before the new one arrives"
+    end
+
+    test "two regions get two ids, so one does not delete the other" do
+      {a, _, _} = FrenchCurve.frame(sample(), :one, protocol: :kitty, placements: false)
+      {b, _, _} = FrenchCurve.frame(sample(), :two, protocol: :kitty, placements: false)
+
+      assert a =~ "i=#{FrenchCurve.image_id(:one)}"
+      assert b =~ "i=#{FrenchCurve.image_id(:two)}"
+      refute FrenchCurve.image_id(:one) == FrenchCurve.image_id(:two)
     end
 
     test "the one-shot path keeps the caret and stays quiet" do

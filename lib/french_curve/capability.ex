@@ -2,15 +2,13 @@ defmodule FrenchCurve.Capability do
   @moduledoc """
   Chooses a graphics protocol from the environment and maps it to a backend module.
 
-  Detection reads `KITTY_WINDOW_ID`, `TERM`, `TERM_PROGRAM`, `TERM_PROGRAM_VERSION` and
-  `KONSOLE_VERSION`. The first matching rule wins, in this order:
+  Detection reads `KITTY_WINDOW_ID`, `TERM`, `TERM_PROGRAM` and `KONSOLE_VERSION`. The first matching rule wins, in this order:
 
   | environment | protocol |
   |---|---|
   | `KITTY_WINDOW_ID` set | `:kitty` |
   | `TERM` contains `kitty` or `ghostty` | `:kitty` |
   | `TERM_PROGRAM` is `WezTerm` | `:kitty` |
-  | `TERM_PROGRAM` is `iTerm.app` and `TERM_PROGRAM_VERSION` is 3.5 or later | `:kitty` |
   | `TERM_PROGRAM` is `iTerm.app` | `:iterm2` |
   | `KONSOLE_VERSION` set | `:sixel` |
   | `TERM` contains `foot` or `mlterm` | `:sixel` |
@@ -20,6 +18,18 @@ defmodule FrenchCurve.Capability do
 
   A terminal detected as `:kitty` does not necessarily speak all of the protocol — ask
   `placements?/1` before storing an image under an id and placing it.
+
+  ## Why iTerm is not `:kitty`
+
+  iTerm from 3.5 does understand kitty's transmit-and-display, and was detected as `:kitty` for
+  a while on the strength of it. That is a trap. A kitty image is an **overlay**: it is not made
+  of cells, so writing text over it does not rub it out, leaving the alternate screen does not
+  discard it, and the only thing that removes it is an explicit delete addressed to its id —
+  which iTerm does not implement. Images pile up over the text while the program runs and are
+  still on the screen after it exits.
+
+  Its own protocol has none of that problem, because an inline image *is* cells: it scrolls,
+  gets overwritten and disappears with the screen it was drawn on, exactly like text.
 
       case FrenchCurve.Capability.detect() do
         :braille -> IO.write(FrenchCurve.to_terminal(raster, :braille))
@@ -73,7 +83,6 @@ defmodule FrenchCurve.Capability do
       fn env -> term_contains?(env, "kitty") && :kitty end,
       fn env -> term_contains?(env, "ghostty") && :kitty end,
       fn env -> env["TERM_PROGRAM"] == "WezTerm" && :kitty end,
-      fn env -> iterm_kitty?(env) && :kitty end,
       fn env -> env["TERM_PROGRAM"] == "iTerm.app" && :iterm2 end,
       fn env -> env["KONSOLE_VERSION"] && :sixel end,
       fn env -> term_contains?(env, "foot") && :sixel end,
@@ -84,27 +93,18 @@ defmodule FrenchCurve.Capability do
   @doc """
   Whether this terminal keeps images under an id and draws them again by placement.
 
-  `detect/1` saying `:kitty` does not mean the whole protocol is there. iTerm from 3.5 speaks
-  enough of it to transmit and display in one command (`a=T`), which is why it is detected as
-  `:kitty` — but it does not keep an image under an id for `FrenchCurve.Backend.Kitty.place/2`
-  to draw again, nor delete one by placement. Code that stores an image and then places it
-  draws nothing at all there: the first command stores a picture the terminal never shows, and
-  the second is not understood.
+  `detect/1` saying `:kitty` does not have to mean the whole protocol is there: a terminal can
+  understand transmit-and-display (`a=T`) without keeping images under an id for
+  `FrenchCurve.Backend.Kitty.place/2` to draw again. Sending one a store and then a placement
+  draws nothing at all — it stores a picture it never shows, then is handed a command it does
+  not understand.
 
-  So anything animating a region has to ask this before choosing how to draw:
-
-      if FrenchCurve.Capability.placements?() do
-        Kitty.delete(id: id, placement: 1) <> Kitty.transmit(raster, id) <> Kitty.place(id)
-      else
-        Kitty.render(raster, cursor: :keep, quiet: true)
-      end
+  `FrenchCurve.frame/3` asks this and picks accordingly; ask it yourself only if you are
+  building the sequence by hand.
 
       iex> FrenchCurve.Capability.placements?(%{"TERM" => "xterm-kitty"})
       true
-      iex> FrenchCurve.Capability.placements?(%{
-      ...>   "TERM_PROGRAM" => "iTerm.app",
-      ...>   "TERM_PROGRAM_VERSION" => "3.5.0"
-      ...> })
+      iex> FrenchCurve.Capability.placements?(%{"TERM_PROGRAM" => "iTerm.app"})
       false
       iex> FrenchCurve.Capability.placements?(%{"TERM" => "xterm-256color"})
       false
@@ -113,7 +113,7 @@ defmodule FrenchCurve.Capability do
   def placements?, do: placements?(System.get_env())
 
   @spec placements?(map) :: boolean
-  def placements?(env) when is_map(env), do: detect(env) == :kitty and not iterm_kitty?(env)
+  def placements?(env) when is_map(env), do: detect(env) == :kitty and not partial_kitty?(env)
 
   @doc """
   Returns the backend module implementing `protocol`.
@@ -132,24 +132,8 @@ defmodule FrenchCurve.Capability do
     String.contains?(env["TERM"] || "", needle)
   end
 
-  @iterm_kitty_from [3, 5]
-
-  defp iterm_kitty?(%{"TERM_PROGRAM" => "iTerm.app"} = env) do
-    case version(env["TERM_PROGRAM_VERSION"]) do
-      [] -> false
-      parts -> parts >= @iterm_kitty_from
-    end
-  end
-
-  defp iterm_kitty?(_env), do: false
-
-  defp version(nil), do: []
-
-  defp version(text) do
-    text
-    |> String.split(".")
-    |> Enum.map(&Integer.parse/1)
-    |> Enum.take_while(&match?({_number, _rest}, &1))
-    |> Enum.map(&elem(&1, 0))
-  end
+  # Terminals that answer to the kitty protocol without keeping images under an id. Nothing is
+  # here today — iTerm was, and is now detected as :iterm2 instead — but the question is real
+  # and this is where the answer goes.
+  defp partial_kitty?(_env), do: false
 end

@@ -39,10 +39,14 @@ defmodule FrenchCurve do
 
   Use this rather than assembling a frame from `FrenchCurve.Backend.Kitty`'s pieces. The kitty
   protocol can store an image under an id and place it repeatedly, which is the cheap way to
-  animate — but **not every terminal that speaks kitty implements that part**. iTerm from 3.5 is
-  detected as `:kitty` and has no stored images or placements at all: sending it a store and
-  then a placement draws nothing whatsoever, so a region animated that way silently stops
-  moving. `FrenchCurve.Capability.placements?/0` is the question, and this function asks it.
+  animate — but not every terminal that speaks kitty implements that part, and one that does
+  not draws nothing at all when sent a store and then a placement.
+  `FrenchCurve.Capability.placements?/0` is the question, and this function asks it.
+
+  Either way the image is **named** and `clear` really removes it. That matters more than it
+  looks: a kitty image is an overlay rather than cells, so text drawn over it does not rub it
+  out and leaving the alternate screen does not discard it. An unnamed one cannot be taken off
+  at all, and is still on the screen after the program has exited.
 
   `id` names the region across frames — any term; the same one must come back each time so the
   picture replaces itself rather than piling up. `nil` for a terminal with no pixels at all,
@@ -65,8 +69,8 @@ defmodule FrenchCurve do
       iex> raster = FrenchCurve.Raster.new(8, 8)
       iex> {paint, clear, place} =
       ...>   FrenchCurve.frame(raster, :meter, fit: {10, 2}, protocol: :kitty, placements: false)
-      iex> {paint =~ "a=T", paint =~ "a=p", clear, place}
-      {true, false, "", nil}
+      iex> {paint =~ "a=T", paint =~ "a=p", clear =~ "a=d", place}
+      {true, false, true, nil}
 
       iex> FrenchCurve.frame(FrenchCurve.Raster.new(8, 8), :meter, protocol: :braille)
       nil
@@ -84,14 +88,29 @@ defmodule FrenchCurve do
     fit = opts[:fit]
     compress? = Keyword.get(opts, :compress, true)
 
+    image = image_id(id)
+
     if Keyword.get_lazy(opts, :placements, &Capability.placements?/0) do
-      image = image_id(id)
       clear = Kitty.delete(id: image, placement: 1)
       place = Kitty.place(image, placement: 1, fit: fit)
 
       {clear <> Kitty.transmit(raster, image, compress: compress?) <> place, clear, place}
     else
-      {Kitty.render(raster, fit: fit, compress: compress?, cursor: :keep, quiet: true), "", nil}
+      # Named even though it is drawn in one command, so that `clear` can take it off again.
+      # A kitty image is an overlay, not cells: nothing else removes it, and an unnamed one
+      # would still be on the screen after the program exits.
+      clear = Kitty.delete(id: image)
+
+      paint =
+        Kitty.render(raster,
+          id: image,
+          fit: fit,
+          compress: compress?,
+          cursor: :keep,
+          quiet: true
+        )
+
+      {clear <> paint, clear, nil}
     end
   end
 

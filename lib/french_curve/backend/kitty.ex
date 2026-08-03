@@ -48,6 +48,10 @@ defmodule FrenchCurve.Backend.Kitty do
       Omitted by default, which is the terminal's own behaviour
     * `:quiet` — suppress the terminal's replies (`q=2`), default `false`. Worth setting for
       anything drawn repeatedly, since the replies otherwise arrive as input
+    * `:id` — also name the image, so `delete/1` can take it off again. **Set this for anything
+      drawn more than once.** A kitty image is an overlay rather than cells: text written over
+      it does not rub it out and leaving the alternate screen does not discard it, so an
+      unnamed one cannot be removed at all and is still on the screen after the program exits
   """
   @spec render(Raster.t(), keyword) :: binary
   def render(%Raster{} = raster, opts \\ []) do
@@ -55,12 +59,14 @@ defmodule FrenchCurve.Backend.Kitty do
 
     control =
       "a=T,f=32,s=#{width},v=#{height}" <>
-        fit_control(opts[:fit]) <> compression(opts) <> cursor(opts) <> quiet(opts)
+        named(opts) <> fit_control(opts[:fit]) <> compression(opts) <> cursor(opts) <> quiet(opts)
 
     raster
     |> payload(opts)
     |> emit(control)
   end
+
+  defp named(opts), do: if(opts[:id], do: ",i=#{opts[:id]}", else: "")
 
   defp cursor(opts), do: if(opts[:cursor] == :keep, do: ",C=1", else: "")
 
