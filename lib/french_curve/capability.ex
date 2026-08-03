@@ -104,6 +104,96 @@ defmodule FrenchCurve.Capability do
   defp matched({:term, needle, protocol}, env), do: term_contains?(env, needle) && protocol
   defp matched({:equals, name, value, protocol}, env), do: env[name] == value && protocol
 
+  @probe "\e[>q\e[c"
+
+  @names [
+    {"kitty", :kitty},
+    {"ghostty", :kitty},
+    {"wezterm", :kitty},
+    {"iterm2", :iterm2},
+    {"foot", :sixel},
+    {"mlterm", :sixel}
+  ]
+
+  @sixel_attribute "4"
+
+  @doc """
+  The bytes to write to a terminal to ask what it supports.
+
+  Two queries: XTVERSION (`CSI > q`), which a terminal answers with its name, and
+  primary device attributes (`CSI c`), which it answers with a list of features.
+  The attributes reply is what `probe_complete?/1` watches for, because nearly
+  every terminal answers it while only some answer XTVERSION — so it arrives last
+  and marks the end of the exchange.
+
+  A terminal that answers neither says nothing at all, which is why a caller must
+  also give up on a timeout.
+
+      iex> FrenchCurve.Capability.probe()
+      "\\e[>q\\e[c"
+
+  """
+  @spec probe() :: binary
+  def probe, do: @probe
+
+  @doc """
+  Whether `replies` contains the device attributes answer that ends the exchange.
+
+      iex> FrenchCurve.Capability.probe_complete?("\\e[?62;4c")
+      true
+
+      iex> FrenchCurve.Capability.probe_complete?("\\eP>|kitty(0.32.2)\\e\\\\")
+      false
+
+  """
+  @spec probe_complete?(binary) :: boolean
+  def probe_complete?(replies) when is_binary(replies) do
+    Regex.match?(~r/\e\[\?[0-9;]*c/, replies)
+  end
+
+  @doc """
+  The protocol `replies` implies, or `nil` when they name nothing usable.
+
+  The terminal's own name wins: a terminal that says it is kitty, ghostty or
+  WezTerm gets `:kitty`, and one that says it is iTerm2 gets `:iterm2` even though
+  it answers kitty's queries. Only when the name is absent or unrecognised do the
+  device attributes decide, where a `4` among them is sixel support.
+
+      iex> FrenchCurve.Capability.from_probe("\\eP>|kitty(0.32.2)\\e\\\\\\e[?62;22c")
+      :kitty
+
+      iex> FrenchCurve.Capability.from_probe("\\e[?62;4;6c")
+      :sixel
+
+      iex> FrenchCurve.Capability.from_probe("\\e[?62;22c")
+      nil
+
+  """
+  @spec from_probe(binary) :: atom | nil
+  def from_probe(replies) when is_binary(replies) do
+    named(replies) || sixel_attribute(replies)
+  end
+
+  defp named(replies) do
+    case Regex.run(~r/\eP>\|([^\e\a]*)/, replies) do
+      [_, name] -> protocol_for_name(String.downcase(name))
+      nil -> nil
+    end
+  end
+
+  defp protocol_for_name(name) do
+    Enum.find_value(@names, fn {needle, protocol} ->
+      String.contains?(name, needle) && protocol
+    end)
+  end
+
+  defp sixel_attribute(replies) do
+    case Regex.run(~r/\e\[\?([0-9;]*)c/, replies) do
+      [_, params] -> if @sixel_attribute in String.split(params, ";"), do: :sixel
+      nil -> nil
+    end
+  end
+
   @doc """
   Whether this terminal keeps images under an id and draws them again by placement.
 
