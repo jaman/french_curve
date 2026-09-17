@@ -174,5 +174,29 @@ defmodule FrenchCurve.Backend.KittyTest do
       assert out =~ "i=7"
       assert out =~ "p=9"
     end
+
+    test "place/2 offsets the image inside its cell by pixels" do
+      out = Kitty.place(7, x_offset: 5, y_offset: 12)
+      assert out =~ "X=5"
+      assert out =~ "Y=12"
+      refute Kitty.place(7) =~ "X="
+    end
+
+    test "place/2 shows a source rectangle of the stored image" do
+      out = Kitty.place(7, source: {16, 8, 320, 160}, fit: {40, 10})
+      assert out =~ "x=16"
+      assert out =~ "y=8"
+      assert out =~ "w=320"
+      assert out =~ "h=160"
+      refute Kitty.place(7) =~ "w="
+    end
+
+    test "delete/1 can remove every placement at a z-index, keeping the images" do
+      out = Kitty.delete(z: 1)
+      assert out =~ "a=d"
+      assert out =~ "d=z"
+      assert out =~ "z=1"
+      refute out =~ "i="
+    end
   end
 end

@@ -88,6 +88,23 @@ defmodule FrenchCurve.RasterTest do
     end
   end
 
+  describe "crop/3" do
+    test "keeps the rectangle from the offset, in either representation" do
+      raster =
+        Raster.new(4, 3)
+        |> Raster.put_pixel(1, 1, {1, 0, 0, 255})
+        |> Raster.put_pixel(3, 2, {2, 0, 0, 255})
+
+      for source <- [raster, Raster.finalize(raster)] do
+        cropped = Raster.crop(source, {1, 1}, {3, 2})
+        assert Raster.dimensions(cropped) == {3, 2}
+        assert Raster.get_pixel(cropped, 0, 0) == {1, 0, 0, 255}
+        assert Raster.get_pixel(cropped, 2, 1) == {2, 0, 0, 255}
+        assert Raster.get_pixel(cropped, 1, 0) == {0, 0, 0, 0}
+      end
+    end
+  end
+
   describe "finalize/1 and the dense cache" do
     test "finalize caches to_rgba_binary, returning an identical buffer" do
       raster = Raster.put_pixel(Raster.new(3, 2), 0, 0, {255, 0, 0, 255})

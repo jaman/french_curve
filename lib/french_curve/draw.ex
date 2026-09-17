@@ -80,6 +80,49 @@ defmodule FrenchCurve.Draw do
   end
 
   @doc """
+  Fills the polygon whose corners are `points`, edges included.
+
+  The polygon is closed from the last point back to the first. Points may be fractional;
+  a pixel is filled when its centre lies inside, using the even-odd rule, and the outline
+  is drawn as well so thin shapes are never lost. Fewer than three points draw as a
+  polyline.
+  """
+  @spec fill_polygon(Raster.t(), [{number, number}], Raster.color()) :: Raster.t()
+  def fill_polygon(%Raster{} = raster, points, color) when length(points) < 3 do
+    polyline(raster, Enum.map(points, &round_point/1), color)
+  end
+
+  def fill_polygon(%Raster{} = raster, points, color) do
+    edges = Enum.zip(points, tl(points) ++ [hd(points)])
+    {top, bottom} = points |> Enum.map(&elem(&1, 1)) |> Enum.min_max()
+
+    filled =
+      Enum.reduce(floor(top)..ceil(bottom)//1, raster, fn y, acc ->
+        centre = y + 0.5
+
+        edges
+        |> Enum.flat_map(&crossing(&1, centre))
+        |> Enum.sort()
+        |> Enum.chunk_every(2, 2, :discard)
+        |> Enum.reduce(acc, fn [from, to], row ->
+          line(row, {round(from), y}, {round(to - 0.0001), y}, color)
+        end)
+      end)
+
+    polyline(filled, Enum.map(points ++ [hd(points)], &round_point/1), color)
+  end
+
+  defp crossing({{x0, y0}, {x1, y1}}, y) do
+    if (y0 <= y and y < y1) or (y1 <= y and y < y0) do
+      [x0 + (y - y0) * (x1 - x0) / (y1 - y0)]
+    else
+      []
+    end
+  end
+
+  defp round_point({x, y}), do: {round(x), round(y)}
+
+  @doc """
   Draws a one-pixel-wide circle outline of `radius` pixels around the centre `{cx, cy}`.
 
   `radius` must be a non-negative integer. The interior is untouched.

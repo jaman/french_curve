@@ -129,6 +129,27 @@ defmodule FrenchCurve.Raster do
   defp cached_pixel(%__MODULE__{} = raster, _x, _y), do: raster.background
 
   @doc """
+  Returns the `{width, height}` rectangle of `raster` whose top left is at `{x, y}`.
+
+  The rectangle must lie inside the raster. The result carries the same background and
+  a dense buffer.
+  """
+  @spec crop(t, point, {pos_integer, pos_integer}) :: t
+  def crop(%__MODULE__{} = raster, {x, y}, {width, height})
+      when x >= 0 and y >= 0 and width > 0 and height > 0 and x + width <= raster.width and
+             y + height <= raster.height do
+    source = to_rgba_binary(raster)
+    stride = raster.width * 4
+
+    rows =
+      for row <- y..(y + height - 1) do
+        binary_part(source, row * stride + x * 4, width * 4)
+      end
+
+    from_rgba(width, height, IO.iodata_to_binary(rows), background: raster.background)
+  end
+
+  @doc """
   Returns every pixel as `height` lists of `width` colours, top row first.
 
   Each element is a `t:color/0`; unwritten positions come back as the background.

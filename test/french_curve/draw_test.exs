@@ -5,6 +5,35 @@ defmodule FrenchCurve.DrawTest do
 
   defp on?(raster, x, y), do: Raster.get_pixel(raster, x, y) != raster.background
 
+  describe "fill_polygon/3" do
+    test "fills a triangle, leaving the outside alone" do
+      raster = Raster.new(10, 10) |> Draw.fill_polygon([{1, 1}, {8, 1}, {1, 8}], {255, 0, 0, 255})
+
+      assert on?(raster, 2, 2)
+      assert on?(raster, 4, 3)
+      refute on?(raster, 8, 8)
+      refute on?(raster, 7, 7)
+    end
+
+    test "fills a rectangle edge to edge" do
+      raster =
+        Raster.new(6, 6) |> Draw.fill_polygon([{1, 1}, {4, 1}, {4, 4}, {1, 4}], {0, 255, 0, 255})
+
+      assert Enum.all?(for(x <- 1..4, y <- 1..4, do: on?(raster, x, y)))
+      refute on?(raster, 0, 0)
+      refute on?(raster, 5, 5)
+    end
+
+    test "takes fractional points" do
+      raster =
+        Raster.new(8, 8)
+        |> Draw.fill_polygon([{3.5, 0.5}, {7.2, 3.9}, {3.5, 7.4}, {0.1, 3.9}], {0, 0, 255, 255})
+
+      assert on?(raster, 3, 3)
+      assert on?(raster, 4, 4)
+    end
+  end
+
   describe "line/4" do
     test "draws a horizontal line" do
       raster =

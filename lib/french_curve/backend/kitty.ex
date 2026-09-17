@@ -110,6 +110,10 @@ defmodule FrenchCurve.Backend.Kitty do
       values sit behind the text
     * `:placement` — integer id for this placement, needed to delete or replace it
       individually. Omitted by default, which lets the terminal assign one.
+    * `:x_offset`, `:y_offset` — pixels to shift the image right and down inside the
+      cursor's cell, each less than the cell's size in that direction
+    * `:source` — `{x, y, width, height}`, the rectangle of the stored image to show, in
+      pixels from its top left. The whole image by default.
 
   Every option is omitted from the sequence when not given, leaving the terminal's default.
   """
@@ -117,25 +121,37 @@ defmodule FrenchCurve.Backend.Kitty do
   def place(id, opts \\ []) do
     control =
       ["a=p", "i=#{id}", "q=2", "C=1"] ++
-        placement_part(opts[:placement]) ++ z_part(opts[:z]) ++ fit_part(opts[:fit])
+        placement_part(opts[:placement]) ++
+        z_part(opts[:z]) ++
+        fit_part(opts[:fit]) ++
+        offset_part(opts[:x_offset], opts[:y_offset]) ++ source_part(opts[:source])
 
     command(Enum.join(control, ","))
   end
 
   @doc """
-  Returns the sequence that removes a stored image and its placements (`a=d,d=i`).
+  Returns the sequence that removes placements (`a=d`).
 
   ## Options
 
-    * `:id` — the image id given to `transmit/3`. Required; raises `KeyError` if absent.
-    * `:placement` — delete only this placement, leaving the image stored and its other
-      placements alone. Omitted by default, which removes the image and every placement
-      of it.
+    * `:id` — the image id given to `transmit/3`; removes the image and every placement
+      of it. Required unless `:z` is given.
+    * `:placement` — with `:id`, delete only this placement, leaving the image stored and
+      its other placements alone.
+    * `:z` — instead of `:id`, delete every placement at this z-index, of any image,
+      keeping the images stored.
   """
   @spec delete(keyword) :: binary
   def delete(opts) do
     control =
-      ["a=d", "d=i", "i=#{Keyword.fetch!(opts, :id)}", "q=2"] ++ placement_part(opts[:placement])
+      case Keyword.fetch(opts, :z) do
+        {:ok, z} ->
+          ["a=d", "d=z", "z=#{z}", "q=2"]
+
+        :error ->
+          ["a=d", "d=i", "i=#{Keyword.fetch!(opts, :id)}", "q=2"] ++
+            placement_part(opts[:placement])
+      end
 
     command(Enum.join(control, ","))
   end
@@ -172,6 +188,19 @@ defmodule FrenchCurve.Backend.Kitty do
 
   defp z_part(nil), do: []
   defp z_part(z), do: ["z=#{z}"]
+
+  defp offset_part(nil, nil), do: []
+  defp offset_part(x, y), do: ["X=#{x || 0}", "Y=#{y || 0}"]
+
+  defp source_part(nil), do: []
+
+  defp source_part({x, y, width, height}),
+    do: [
+      "x=" <> Integer.to_string(x),
+      "y=" <> Integer.to_string(y),
+      "w=" <> Integer.to_string(width),
+      "h=" <> Integer.to_string(height)
+    ]
 
   defp fit_part(nil), do: []
   defp fit_part({cols, rows}), do: ["c=#{cols}", "r=#{rows}"]
