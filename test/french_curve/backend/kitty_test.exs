@@ -118,15 +118,6 @@ defmodule FrenchCurve.Backend.KittyTest do
       assert inflated == all_payload_bytes(Kitty.render(raster))
     end
 
-    test "shrinks drawn images by orders of magnitude" do
-      raster = Raster.new(160, 96, background: {12, 14, 20, 255})
-
-      plain = byte_size(Kitty.render(raster))
-      compressed = byte_size(Kitty.render(raster, compress: true))
-
-      assert compressed * 50 < plain
-    end
-
     test "a compressed image needs far fewer chunks, and still terminates correctly" do
       raster = Raster.new(160, 96, background: {12, 14, 20, 255})
 

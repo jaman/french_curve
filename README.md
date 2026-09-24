@@ -33,12 +33,15 @@ how they serialize it.
 | Backend | Output | Terminals |
 |---|---|---|
 | `:braille` | Unicode 2×4 dot cells (text) | Every terminal (incl. Ghostty, Alacritty, tmux, ssh) |
+| `:cells` | Block characters, two colours per cell, in a glyph set: `:half` (1×2), `:quad` (2×2), `:sextant` (2×3, Unicode 13), `:braille` (2×4 dots), `:octant` (2×4, Unicode 16) | Every terminal for `:half`; the finer sets need a font or terminal that draws them (Ghostty and kitty draw octants themselves; iTerm2 draws sextants, octants with Cascadia Mono 2404.23+) |
 | `:kitty` | Kitty graphics protocol, raw RGBA (`f=32`) | Kitty, Ghostty, WezTerm, Konsole |
 | `:sixel` | Sixel (palette-based, RLE) | iTerm2, WezTerm, foot, Konsole, xterm |
 | `:iterm2` | iTerm2 inline image (PNG via `:zlib`) | iTerm2, WezTerm |
 
-`:braille` returns cell rows (`[[{grapheme, rgb_or_nil}]]`); the pixel backends
-return an escape-sequence string.
+`:braille` returns cell rows (`[[{grapheme, rgb_or_nil}]]`), `:cells` returns
+`[[{grapheme, fg_rgb, bg_rgb}]]`; the pixel backends return an escape-sequence string.
+`:cells` is never detected — name it, with `set:`; `FrenchCurve.Backend.Cells.default_set/1`
+suggests a set for a terminal.
 
 ## Usage
 
@@ -88,6 +91,14 @@ other change.
 
 `braille` renders in any terminal; `kitty`/`sixel`/`iterm2` only display where the
 terminal supports that protocol (elsewhere you'll see raw escape bytes).
+
+`FrenchCurve.Capability.detect/1` picks `:iterm2`, iTerm2's own inline images, for
+iTerm2 at every version; iTerm2 from 3.5 also answers the kitty query, and
+`FRENCH_CURVE_ITERM2=kitty` sends it kitty frames instead. Animated images of either
+kind flicker in iTerm2 while its GPU renderer is on — each new frame's cells show as
+background until the frame is decoded — and draw smoothly with **GPU rendering** off
+(Settings → General → Magic); nothing sent by the program changes that. Animating with
+kitty frames on iTerm2 older than 3.7.3 grows its memory for as long as the window lives.
 
 ## Redrawing a region
 

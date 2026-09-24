@@ -4,17 +4,11 @@ defmodule FrenchCurve.RasterTest do
   alias FrenchCurve.Raster
 
   describe "new/3" do
-    test "creates a raster with the given dimensions" do
-      assert Raster.dimensions(Raster.new(10, 5)) == {10, 5}
-    end
-
-    test "defaults every pixel to transparent black" do
+    test "an unwritten pixel reads as the background, transparent black unless given one" do
       assert Raster.get_pixel(Raster.new(3, 3), 0, 0) == {0, 0, 0, 0}
-    end
 
-    test "accepts a custom background" do
-      raster = Raster.new(3, 3, background: {10, 20, 30, 255})
-      assert Raster.get_pixel(raster, 1, 1) == {10, 20, 30, 255}
+      assert Raster.get_pixel(Raster.new(3, 3, background: {10, 20, 30, 255}), 1, 1) ==
+               {10, 20, 30, 255}
     end
 
     test "rejects non-positive dimensions" do
@@ -24,13 +18,9 @@ defmodule FrenchCurve.RasterTest do
   end
 
   describe "put_pixel/4" do
-    test "sets a pixel that can be read back" do
+    test "sets a pixel that can be read back, leaving its neighbours at the background" do
       raster = Raster.put_pixel(Raster.new(4, 4), 2, 1, {255, 0, 0, 255})
       assert Raster.get_pixel(raster, 2, 1) == {255, 0, 0, 255}
-    end
-
-    test "leaves other pixels at the background" do
-      raster = Raster.put_pixel(Raster.new(4, 4), 2, 1, {255, 0, 0, 255})
       assert Raster.get_pixel(raster, 0, 0) == {0, 0, 0, 0}
     end
 

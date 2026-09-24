@@ -20,6 +20,9 @@ defmodule FrenchCurve.Capability do
 
   `:braille` is the fallback because it needs no graphics support at all.
 
+  `FRENCH_CURVE_ITERM2=kitty` sends iTerm2 to `:kitty` instead; other terminals ignore
+  it.
+
   `WEZTERM_PANE` and `LC_TERMINAL` cover terminals whose `TERM_PROGRAM` did not survive the
   trip: multiplexers drop it, and ssh forwards only the variables its client is configured to
   send, which for iTerm2 is `LC_TERMINAL` under the usual `SendEnv LC_*`. Detecting a remote
@@ -29,17 +32,12 @@ defmodule FrenchCurve.Capability do
   A terminal detected as `:kitty` does not necessarily speak all of the protocol — ask
   `placements?/1` before storing an image under an id and placing it.
 
-  ## Why iTerm is not `:kitty`
+  ## iTerm2
 
-  iTerm from 3.5 does understand kitty's transmit-and-display, and was detected as `:kitty` for
-  a while on the strength of it. That is a trap. A kitty image is an **overlay**: it is not made
-  of cells, so writing text over it does not rub it out, leaving the alternate screen does not
-  discard it, and the only thing that removes it is an explicit delete addressed to its id —
-  which iTerm does not implement. Images pile up over the text while the program runs and are
-  still on the screen after it exits.
-
-  Its own protocol has none of that problem, because an inline image *is* cells: it scrolls,
-  gets overwritten and disappears with the screen it was drawn on, exactly like text.
+  iTerm2 gets its own inline images. Forced to `:kitty`, it speaks transmit-and-display
+  and delete only: `placements?/1` is `false` for it at every version, and
+  `FrenchCurve.frame/3` retransmits each frame. What each path costs on iTerm2 is set
+  out in the README.
 
       case FrenchCurve.Capability.detect() do
         :braille -> IO.write(FrenchCurve.to_terminal(raster, :braille))
@@ -97,7 +95,30 @@ defmodule FrenchCurve.Capability do
 
   @spec detect(map) :: atom
   def detect(env) when is_map(env) do
-    Enum.find_value(@rules, :braille, &matched(&1, env))
+    case Enum.find_value(@rules, :braille, &matched(&1, env)) do
+      :iterm2 -> iterm2_protocol(env)
+      protocol -> protocol
+    end
+  end
+
+  @doc """
+  Whether `env` describes an iTerm2 session, locally or over ssh.
+
+      iex> FrenchCurve.Capability.iterm2?(%{"LC_TERMINAL" => "iTerm2"})
+      true
+      iex> FrenchCurve.Capability.iterm2?(%{"TERM" => "xterm-kitty"})
+      false
+  """
+  @spec iterm2?(map) :: boolean
+  def iterm2?(env) when is_map(env),
+    do: env["TERM_PROGRAM"] == "iTerm.app" or env["LC_TERMINAL"] == "iTerm2"
+
+  defp iterm2_protocol(env) do
+    case env["FRENCH_CURVE_ITERM2"] do
+      "inline" -> :iterm2
+      "kitty" -> :kitty
+      _unset -> :iterm2
+    end
   end
 
   defp matched({:set, name, protocol}, env), do: set?(env, name) && protocol
@@ -208,7 +229,7 @@ defmodule FrenchCurve.Capability do
 
       iex> FrenchCurve.Capability.placements?(%{"TERM" => "xterm-kitty"})
       true
-      iex> FrenchCurve.Capability.placements?(%{"TERM_PROGRAM" => "iTerm.app"})
+      iex> FrenchCurve.Capability.placements?(%{"TERM_PROGRAM" => "iTerm.app", "TERM_PROGRAM_VERSION" => "3.7.2"})
       false
       iex> FrenchCurve.Capability.placements?(%{"TERM" => "xterm-256color"})
       false
@@ -227,7 +248,7 @@ defmodule FrenchCurve.Capability do
   @doc """
   Returns the backend module implementing `protocol`.
 
-  Accepts `:kitty`, `:sixel`, `:iterm2` and `:braille`; any other value raises
+  Accepts `:kitty`, `:sixel`, `:iterm2`, `:braille` and `:cells`; any other value raises
   `FunctionClauseError`. Every returned module exports `render/2` taking a
   `FrenchCurve.Raster` and a keyword list.
   """
@@ -236,6 +257,7 @@ defmodule FrenchCurve.Capability do
   def backend(:sixel), do: Backend.Sixel
   def backend(:iterm2), do: Backend.Iterm2
   def backend(:braille), do: Backend.Braille
+  def backend(:cells), do: Backend.Cells
 
   defp term_contains?(env, needle) do
     String.contains?(env["TERM"] || "", needle)
@@ -243,5 +265,5 @@ defmodule FrenchCurve.Capability do
 
   defp set?(env, name), do: env[name] not in [nil, ""]
 
-  defp partial_kitty?(_env), do: false
+  defp partial_kitty?(env), do: iterm2?(env)
 end

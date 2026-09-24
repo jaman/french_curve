@@ -3,7 +3,7 @@ defmodule FrenchCurve do
   Draws pixel rasters to a terminal over whichever graphics protocol it supports.
 
   A `FrenchCurve.Raster` is built with `FrenchCurve.Draw` or `FrenchCurve.Chart`, then
-  handed to one of four backends: `:kitty`, `:sixel`, `:iterm2` or `:braille`.
+  handed to one of five backends: `:kitty`, `:sixel`, `:iterm2`, `:braille` or `:cells`.
   `FrenchCurve.Capability.detect/0` picks one from the environment when none is named.
 
       raster =
@@ -13,7 +13,9 @@ defmodule FrenchCurve do
       IO.write(FrenchCurve.to_terminal(raster, :kitty))
 
   `render/2` and `render/3` return each backend's native form, which differs by protocol:
-  the three pixel backends return an escape-sequence binary, `:braille` returns cell rows.
+  the three pixel backends return an escape-sequence binary, `:braille` and `:cells` return
+  cell rows. `:cells` is never detected: which of its glyph sets a terminal draws depends on
+  its font, so a caller names it (`FrenchCurve.Backend.Cells.default_set/1` suggests one).
   `to_terminal/3` returns a binary for every protocol and is what you write to the device.
 
   For a region that is drawn over and over — a meter, a scope, anything animated — use
@@ -22,7 +24,7 @@ defmodule FrenchCurve do
   alone.
   """
 
-  alias FrenchCurve.Backend.{Braille, Kitty}
+  alias FrenchCurve.Backend.{Braille, Cells, Kitty}
   alias FrenchCurve.{Capability, Raster}
 
   @typedoc """
@@ -78,7 +80,7 @@ defmodule FrenchCurve do
   @spec frame(Raster.t(), term, keyword) :: frame | nil
   def frame(%Raster{} = raster, id, opts \\ []) do
     case Keyword.get(opts, :protocol) || Capability.detect() do
-      :braille -> nil
+      cells when cells in [:braille, :cells] -> nil
       :kitty -> kitty_frame(raster, id, opts)
       protocol -> {to_terminal(raster, protocol, fit: opts[:fit]), "", nil}
     end
@@ -145,13 +147,13 @@ defmodule FrenchCurve do
   @doc """
   Renders `raster` with `protocol`, delegating to that backend's `render/2`.
 
-  `protocol` must be one of `:kitty`, `:sixel`, `:iterm2` or `:braille`; any other atom
+  `protocol` must be one of `:kitty`, `:sixel`, `:iterm2`, `:braille` or `:cells`; any other atom
   raises `FunctionClauseError` from `FrenchCurve.Capability.backend/1`. `opts` are the
   options of the backend selected — see `FrenchCurve.Backend.Kitty.render/2`,
   `FrenchCurve.Backend.Sixel.render/2`, `FrenchCurve.Backend.Iterm2.render/2` and
-  `FrenchCurve.Backend.Braille.render/2`.
+  `FrenchCurve.Backend.Braille.render/2` and `FrenchCurve.Backend.Cells.render/2`.
 
-  Returns a binary for the pixel protocols and cell rows for `:braille`.
+  Returns a binary for the pixel protocols and cell rows for `:braille` and `:cells`.
   """
   @spec render(Raster.t(), atom, keyword) :: term
   def render(%Raster{} = raster, protocol, opts) when is_atom(protocol) do
@@ -170,6 +172,10 @@ defmodule FrenchCurve do
 
   def to_terminal(%Raster{} = raster, :braille, opts) do
     raster |> render(:braille, opts) |> Braille.to_ansi()
+  end
+
+  def to_terminal(%Raster{} = raster, :cells, opts) do
+    raster |> render(:cells, opts) |> Cells.to_ansi()
   end
 
   def to_terminal(%Raster{} = raster, protocol, opts) when is_atom(protocol) do

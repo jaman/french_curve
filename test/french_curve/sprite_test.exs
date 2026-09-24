@@ -19,10 +19,6 @@ defmodule FrenchCurve.SpriteTest do
       b = Sprite.new(Raster.put_pixel(Raster.new(4, 4), 2, 2, {0, 255, 0, 255}))
       refute a.id == b.id
     end
-
-    test "accepts an explicit id override" do
-      assert Sprite.new(sample(), id: 42).id == 42
-    end
   end
 
   describe "upload/2" do

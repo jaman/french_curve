@@ -30,18 +30,16 @@ defmodule FrenchCurve.CapabilityTest do
                :iterm2
     end
 
-    test "every iterm uses its own protocol, whatever version it reports" do
-      # 3.5 and later understand kitty's transmit-and-display and were detected as :kitty for a
-      # while. They have no way to remove such an image, though — it is an overlay rather than
-      # cells, so it outlives the text drawn over it and the screen it was drawn on, and ends up
-      # smeared across the terminal after the program exits. Inline images are cells and behave.
-      for version <- ["3.5", "3.5.0", "3.6.11", "4.0", "3.10.0", "3.6.11beta", "3.4.23", ""] do
-        assert Capability.detect(%{
-                 "TERM_PROGRAM" => "iTerm.app",
-                 "TERM_PROGRAM_VERSION" => version
-               }) == :iterm2,
-               "expected iTerm #{inspect(version)} to use its own inline protocol"
-      end
+    test "FRENCH_CURVE_ITERM2 chooses iterm's protocol whatever its version" do
+      new = %{"TERM_PROGRAM" => "iTerm.app", "TERM_PROGRAM_VERSION" => "3.7.2"}
+      old = %{"TERM_PROGRAM" => "iTerm.app", "TERM_PROGRAM_VERSION" => "3.4.23"}
+
+      assert Capability.detect(Map.put(new, "FRENCH_CURVE_ITERM2", "inline")) == :iterm2
+      assert Capability.detect(Map.put(old, "FRENCH_CURVE_ITERM2", "kitty")) == :kitty
+      assert Capability.detect(Map.put(new, "FRENCH_CURVE_ITERM2", "")) == :iterm2
+
+      assert Capability.detect(%{"TERM" => "xterm-ghostty", "FRENCH_CURVE_ITERM2" => "inline"}) ==
+               :kitty
     end
 
     test "foot and konsole use sixel" do
@@ -59,10 +57,13 @@ defmodule FrenchCurve.CapabilityTest do
       assert Capability.detect(%{"TERM" => "xterm-256color", "WEZTERM_PANE" => "3"}) == :kitty
     end
 
-    test "iterm is recognised over ssh by the locale variable it forwards" do
+    test "iterm is recognised over ssh by the locale variables it forwards" do
       assert Capability.detect(%{"LC_TERMINAL" => "iTerm2"}) == :iterm2
 
       assert Capability.detect(%{"TERM" => "xterm-256color", "LC_TERMINAL" => "iTerm2"}) ==
+               :iterm2
+
+      assert Capability.detect(%{"LC_TERMINAL" => "iTerm2", "LC_TERMINAL_VERSION" => "3.7.2"}) ==
                :iterm2
     end
 
@@ -169,17 +170,19 @@ defmodule FrenchCurve.CapabilityTest do
   end
 
   describe "placements?/1" do
+    test "iTerm keeps no images under an id, however it was detected" do
+      refute Capability.placements?(%{"TERM_PROGRAM" => "iTerm.app"})
+      refute Capability.placements?(%{"LC_TERMINAL" => "iTerm2"})
+
+      refute Capability.placements?(%{
+               "TERM_PROGRAM" => "iTerm.app",
+               "FRENCH_CURVE_ITERM2" => "kitty"
+             })
+    end
+
     test "a real kitty keeps images under an id" do
       assert Capability.placements?(%{"TERM" => "xterm-kitty"})
       assert Capability.placements?(%{"KITTY_WINDOW_ID" => "1"})
-    end
-
-    test "iTerm has none, at any version" do
-      for version <- ~w(3.4.23 3.5.0 3.5.11 4.0 5.1.2) do
-        env = %{"TERM_PROGRAM" => "iTerm.app", "TERM_PROGRAM_VERSION" => version}
-
-        refute Capability.placements?(env), "iTerm #{version}"
-      end
     end
 
     test "a terminal with no graphics at all has no placements either" do

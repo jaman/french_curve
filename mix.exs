@@ -1,7 +1,7 @@
 defmodule FrenchCurve.MixProject do
   use Mix.Project
 
-  @version "0.1.4"
+  @version "0.1.5"
   @source_url "https://github.com/jaman/french_curve"
 
   def project do
@@ -9,6 +9,9 @@ defmodule FrenchCurve.MixProject do
       app: :french_curve,
       version: @version,
       elixir: "~> 1.19",
+      compilers: [:elixir_make | Mix.compilers()],
+      make_targets: ["all"],
+      make_clean: ["clean"],
       start_permanent: Mix.env() == :prod,
       deps: deps(),
       name: "FrenchCurve",
@@ -35,7 +38,7 @@ defmodule FrenchCurve.MixProject do
     [
       licenses: ["MIT"],
       links: %{"GitHub" => @source_url},
-      files: ~w(lib examples .formatter.exs mix.exs README.md LICENSE)
+      files: ~w(lib c_src examples Makefile .formatter.exs mix.exs README.md LICENSE)
     ]
   end
 
@@ -74,6 +77,7 @@ defmodule FrenchCurve.MixProject do
 
   defp deps do
     [
+      {:elixir_make, "~> 0.9", runtime: false},
       {:ex_doc, "~> 0.34", only: :dev, runtime: false},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},

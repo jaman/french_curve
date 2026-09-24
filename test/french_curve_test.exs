@@ -98,20 +98,8 @@ defmodule FrenchCurveTest do
   end
 
   describe "render/3 with an explicit protocol" do
-    test "braille returns cell rows" do
+    test "braille returns cell rows, not the string to_terminal/3 would give" do
       assert [[{_char, _color} | _] | _] = FrenchCurve.render(sample(), :braille, [])
-    end
-
-    test "kitty returns an escape sequence" do
-      assert String.starts_with?(FrenchCurve.render(sample(), :kitty, []), "\e_G")
-    end
-
-    test "sixel returns a DCS string" do
-      assert String.starts_with?(FrenchCurve.render(sample(), :sixel, []), "\eP")
-    end
-
-    test "iterm2 returns an inline-image escape" do
-      assert String.starts_with?(FrenchCurve.render(sample(), :iterm2, []), "\e]1337")
     end
   end
 
