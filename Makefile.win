@@ -1,0 +1,20 @@
+PRIV_DIR = priv
+
+all: $(PRIV_DIR) cells deflate
+
+$(PRIV_DIR):
+	if not exist $(PRIV_DIR) mkdir $(PRIV_DIR)
+
+cells:
+	-cl /nologo /LD /O2 /I"$(ERTS_INCLUDE_DIR)" c_src\cells_nif.c /Fe:$(PRIV_DIR)\cells_nif.dll
+	if exist cells_nif.obj del /Q cells_nif.obj
+	if not exist $(PRIV_DIR)\cells_nif.dll echo french_curve: no C compiler, cells are quantised in Elixir
+
+deflate:
+	@echo french_curve: no libdeflate on Windows, pictures are compressed with zlib
+
+clean:
+	if exist $(PRIV_DIR)\*.dll del /Q $(PRIV_DIR)\*.dll
+	if exist $(PRIV_DIR)\*.lib del /Q $(PRIV_DIR)\*.lib
+	if exist $(PRIV_DIR)\*.exp del /Q $(PRIV_DIR)\*.exp
+

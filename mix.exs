@@ -1,7 +1,7 @@
 defmodule FrenchCurve.MixProject do
   use Mix.Project
 
-  @version "0.1.5"
+  @version "0.1.4"
   @source_url "https://github.com/jaman/french_curve"
 
   def project do
@@ -30,7 +30,7 @@ defmodule FrenchCurve.MixProject do
   end
 
   defp description do
-    "Terminal graphics in pure Elixir. Draw charts, curves and sprites into an RGBA " <>
+    "Terminal graphics for Elixir. Draw charts, curves and sprites into an RGBA " <>
       "raster and emit it over the kitty, sixel, iTerm2 or braille protocol."
   end
 
@@ -38,7 +38,7 @@ defmodule FrenchCurve.MixProject do
     [
       licenses: ["MIT"],
       links: %{"GitHub" => @source_url},
-      files: ~w(lib c_src examples Makefile .formatter.exs mix.exs README.md LICENSE)
+      files: ~w(lib c_src examples Makefile Makefile.win .formatter.exs mix.exs README.md CHANGELOG.md LICENSE)
     ]
   end
 
@@ -46,7 +46,7 @@ defmodule FrenchCurve.MixProject do
     [
       main: "readme",
       source_ref: "v#{@version}",
-      extras: ["README.md", "LICENSE"],
+      extras: ["README.md", "CHANGELOG.md", "LICENSE"],
       groups_for_modules: [
         Drawing: [
           FrenchCurve.Raster,

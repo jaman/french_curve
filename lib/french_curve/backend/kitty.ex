@@ -27,7 +27,7 @@ defmodule FrenchCurve.Backend.Kitty do
   turn it on only for terminals you know accept it.
   """
 
-  alias FrenchCurve.Raster
+  alias FrenchCurve.{Deflate, Raster}
 
   @chunk_size 4096
 
@@ -41,7 +41,8 @@ defmodule FrenchCurve.Backend.Kitty do
 
     * `:fit` — `{cols, rows}`, the cell box the terminal scales the image into. Omitted by
       default, which sizes the image from its pixel dimensions.
-    * `:compress` — deflate the pixels before base64 and mark the payload `o=z`, default
+    * `:compress` — deflate the pixels before base64 and mark the payload `o=z`; an
+      integer sets the level `FrenchCurve.Deflate` compresses at, default
       `false`
     * `:cursor` — `:keep` leaves the caret where it was (`C=1`) rather than letting the
       terminal move it past the image, which near the bottom of the screen would scroll.
@@ -81,7 +82,8 @@ defmodule FrenchCurve.Backend.Kitty do
 
   ## Options
 
-    * `:compress` — deflate the pixels before base64 and mark the payload `o=z`, default
+    * `:compress` — deflate the pixels before base64 and mark the payload `o=z`; an
+      integer sets the level `FrenchCurve.Deflate` compresses at, default
       `false`
 
   Sizing is chosen per placement rather than per image, so `:fit` has no effect here and
@@ -164,7 +166,8 @@ defmodule FrenchCurve.Backend.Kitty do
     |> chunk(@chunk_size)
   end
 
-  defp deflate(binary, true), do: :zlib.compress(binary)
+  defp deflate(binary, true), do: Deflate.compress(binary)
+  defp deflate(binary, level) when is_integer(level), do: Deflate.compress(binary, level)
   defp deflate(binary, _off), do: binary
 
   defp compression(opts), do: if(opts[:compress], do: ",o=z", else: "")

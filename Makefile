@@ -10,20 +10,35 @@ endif
 
 ERTS_INCLUDE_DIR ?= $(shell erl -noshell -eval 'io:format("~s/include", [code:root_dir() ++ "/erts-" ++ erlang:system_info(version)])' -s init stop)
 
-PRIV_DIR = priv
-NIF_SO = $(PRIV_DIR)/cells_nif.so
-NIF_SRC = c_src/cells_nif.c
+DEFLATE_CFLAGS := $(shell pkg-config --cflags libdeflate 2>/dev/null)
+DEFLATE_LIBS := $(shell pkg-config --libs libdeflate 2>/dev/null)
 
-all: $(PRIV_DIR)
-	@$(CC) $(CFLAGS) -I$(ERTS_INCLUDE_DIR) -o $(NIF_SO).tmp $(NIF_SRC) $(LDFLAGS) \
-		&& mv -f $(NIF_SO).tmp $(NIF_SO) && rm -rf $(NIF_SO).tmp.dSYM \
+PRIV_DIR = priv
+
+all: $(PRIV_DIR) cells deflate
+
+cells: | $(PRIV_DIR)
+	@$(CC) $(CFLAGS) -I$(ERTS_INCLUDE_DIR) -o $(PRIV_DIR)/cells_nif.so.tmp c_src/cells_nif.c $(LDFLAGS) \
+		&& mv -f $(PRIV_DIR)/cells_nif.so.tmp $(PRIV_DIR)/cells_nif.so \
+		&& rm -rf $(PRIV_DIR)/cells_nif.so.tmp.dSYM \
 		|| echo "french_curve: no C compiler, cells are quantised in Elixir"
+
+deflate: | $(PRIV_DIR)
+ifeq ($(strip $(DEFLATE_LIBS)),)
+	@echo "french_curve: no libdeflate, pictures are compressed with zlib"
+else
+	@$(CC) $(CFLAGS) $(DEFLATE_CFLAGS) -I$(ERTS_INCLUDE_DIR) -o $(PRIV_DIR)/deflate_nif.so.tmp \
+		c_src/deflate_nif.c $(LDFLAGS) $(DEFLATE_LIBS) \
+		&& mv -f $(PRIV_DIR)/deflate_nif.so.tmp $(PRIV_DIR)/deflate_nif.so \
+		&& rm -rf $(PRIV_DIR)/deflate_nif.so.tmp.dSYM \
+		|| echo "french_curve: libdeflate would not link, pictures are compressed with zlib"
+endif
 
 $(PRIV_DIR):
 	mkdir -p $(PRIV_DIR)
 
 clean:
-	rm -f $(NIF_SO) $(PRIV_DIR)/*.tmp
+	rm -f $(PRIV_DIR)/*.so $(PRIV_DIR)/*.tmp
 	rm -rf $(PRIV_DIR)/*.tmp.dSYM
 
-.PHONY: all clean
+.PHONY: all cells deflate clean
