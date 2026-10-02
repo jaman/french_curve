@@ -38,7 +38,8 @@ defmodule FrenchCurve.MixProject do
     [
       licenses: ["MIT"],
       links: %{"GitHub" => @source_url},
-      files: ~w(lib c_src examples Makefile Makefile.win .formatter.exs mix.exs README.md CHANGELOG.md LICENSE)
+      files:
+        ~w(lib c_src examples Makefile Makefile.win .formatter.exs mix.exs README.md CHANGELOG.md LICENSE)
     ]
   end
 
