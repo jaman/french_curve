@@ -224,7 +224,7 @@ defmodule FrenchCurve.Backend.Cells do
 
   @doc false
   def load_nif do
-    path = :french_curve |> :code.priv_dir() |> Path.join("cells_nif") |> to_charlist()
+    path = FrenchCurve.Native.path("cells_nif")
 
     case :erlang.load_nif(path, 0) do
       :ok -> :persistent_term.put({__MODULE__, :native?}, true)

@@ -172,6 +172,10 @@ defmodule FrenchCurve.Raster do
   @spec to_rgba_binary(t) :: binary
   def to_rgba_binary(%__MODULE__{rgba: rgba}) when is_binary(rgba), do: rgba
 
+  def to_rgba_binary(%__MODULE__{pixels: pixels, background: {r, g, b, a}} = raster)
+      when map_size(pixels) == 0,
+      do: :binary.copy(<<r, g, b, a>>, raster.width * raster.height)
+
   def to_rgba_binary(%__MODULE__{} = raster) do
     for row <- rows(raster), {r, g, b, a} <- row, into: <<>>, do: <<r, g, b, a>>
   end

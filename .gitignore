@@ -24,3 +24,4 @@ french_curve-*.tar
 
 /priv/*.so
 /priv/*.dSYM/
+/priv/native/

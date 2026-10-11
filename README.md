@@ -1,8 +1,9 @@
 # FrenchCurve
 
-Pure-Elixir terminal graphics for **generating** visualizations — charts, graphs,
+Terminal graphics in Elixir for **generating** visualizations — charts, graphs,
 lines — and emitting them through whichever image protocol the terminal supports.
-No native dependencies, no image decoding (you draw the pixels), no supervision tree.
+Pure Elixir, with optional native helpers for cells and deflate that are built when a
+C compiler is present; no image decoding (you draw the pixels), no supervision tree.
 
 [![Hex.pm](https://img.shields.io/hexpm/v/french_curve.svg)](https://hex.pm/packages/french_curve)
 [![Docs](https://img.shields.io/badge/hex-docs-blue.svg)](https://hexdocs.pm/french_curve)
@@ -12,12 +13,21 @@ No native dependencies, no image decoding (you draw the pixels), no supervision 
 ```elixir
 def deps do
   [
-    {:french_curve, "~> 0.1"}
+    {:french_curve, "~> 0.2"}
   ]
 end
 ```
 
 Nothing to start and nothing to configure — every module is a pure function over values.
+
+## Requirements
+
+- `make` and `erl` on `PATH` at build time: compiling runs `make` through
+  `elixir_make` (on Windows, `nmake` runs `Makefile.win`)
+- A C compiler, optional: builds the helper that splits each cell's colours for
+  `FrenchCurve.Backend.Cells`; without one that backend runs in Elixir
+- libdeflate, optional, found through `pkg-config`: compresses kitty payloads faster
+  than `:zlib`, which `FrenchCurve.Deflate` uses without it
 
 ## Pipeline
 
@@ -69,20 +79,28 @@ FrenchCurve.render(raster)
 
 ## Try it
 
-`examples/render_demo.exs` draws smoothed sine/cosine curves and emits them through
-a chosen backend, straight to your terminal:
+The examples run from a clone of <https://github.com/jaman/french_curve>; they are not
+in the Hex package. `render_demo.exs` draws smoothed sine/cosine curves through every
+backend, labelled; `auto` detects this terminal and renders that one; a backend name
+(`kitty`, `sixel`, `iterm2`, `braille`) renders that one alone:
 
 ```bash
-mix run examples/render_demo.exs           # line chart, every backend, labelled
-mix run examples/render_demo.exs auto       # detect this terminal and render that one
-mix run examples/render_demo.exs kitty      # kitty | sixel | iterm2 | braille
+mix run examples/render_demo.exs
+mix run examples/render_demo.exs auto
+mix run examples/render_demo.exs kitty
+```
 
-mix run examples/area_demo.exs              # filled area chart, every backend
-mix run examples/area_demo.exs sixel        # or a single backend
+`area_demo.exs` draws a filled area chart the same way, and `animated_area.exs` a
+live scrolling area chart, in braille by default, through a pixel backend when one is
+named, stopping after a frame count when one is given:
 
-mix run examples/animated_area.exs          # live scrolling braille area chart
-mix run examples/animated_area.exs sixel     # animate via a pixel backend
-mix run examples/animated_area.exs sixel 40  # pixel backend, N frames then stop
+```bash
+mix run examples/area_demo.exs
+mix run examples/area_demo.exs sixel
+
+mix run examples/animated_area.exs
+mix run examples/animated_area.exs sixel
+mix run examples/animated_area.exs sixel 40
 ```
 
 `to_terminal/3` returns a printable binary for any backend (braille cells are
@@ -91,14 +109,6 @@ other change.
 
 `braille` renders in any terminal; `kitty`/`sixel`/`iterm2` only display where the
 terminal supports that protocol (elsewhere you'll see raw escape bytes).
-
-`FrenchCurve.Capability.detect/1` picks `:iterm2`, iTerm2's own inline images, for
-iTerm2 at every version; iTerm2 from 3.5 also answers the kitty query, and
-`FRENCH_CURVE_ITERM2=kitty` sends it kitty frames instead. Animated images of either
-kind flicker in iTerm2 while its GPU renderer is on — each new frame's cells show as
-background until the frame is decoded — and draw smoothly with **GPU rendering** off
-(Settings → General → Magic); nothing sent by the program changes that. Animating with
-kitty frames on iTerm2 older than 3.7.3 grows its memory for as long as the window lives.
 
 ## Redrawing a region
 
@@ -169,10 +179,9 @@ The host owns the tty, raw mode, and timeout; FrenchCurve never reads or writes 
 
 ## Sprites (tiles, tokens, game grids)
 
-A `Sprite` is a `Raster` with a stable, content-addressed id. The point is **one
-definition, many placements** — author a tile once, stamp it across a grid cheaply.
-This mirrors how Elixir already shares the underlying pixel binary, and on kitty it
-mirrors the protocol too (transmit once, place many by reference, with z-index layers).
+A `Sprite` is a `Raster` with a stable, content-addressed id: author a tile once, stamp
+it across a grid as many times as needed. On kitty that is the protocol's own model —
+upload once, place many by reference, with z-index layers.
 
 ```elixir
 tree = FrenchCurve.Sprite.new(tree_raster, id: 2)
@@ -212,10 +221,13 @@ no image decoder. Store a catalog as raw RGBA + dims (optionally zlib-compressed
 download; `:zlib` is built into OTP), then inflate and load locally:
 
 ```elixir
-{w, h, packed} = fetch_from_catalog("tree")          # your transport
-rgba = :zlib.uncompress(packed)                        # if you compressed it
-tree = w |> Raster.from_rgba(h, rgba) |> Sprite.new()
+{w, h, packed} = fetch_from_catalog("tree")
+rgba = :zlib.uncompress(packed)
+tree = w |> FrenchCurve.Raster.from_rgba(h, rgba) |> FrenchCurve.Sprite.new()
 ```
+
+`fetch_from_catalog/1` is the host's own transport, and the `:zlib.uncompress/1` step
+applies only when the catalog was compressed.
 
 
 ## Compression (kitty)
@@ -231,19 +243,8 @@ FrenchCurve.Sprite.upload(sprite, :kitty, compress: true)
 Off by default: the protocol's compression is optional, so a partial implementation may not
 have it. Turn it on when you know what you are drawing to.
 
-It matters because of what image data usually *is* here. Anything drawn rather than
-photographed — a chart, a tilemap, a sprite sheet — is enormously repetitive, and that is the
-case zlib is best at. Measured on a 640×384 tilemap frame:
-
-| | payload | deflate |
-|---|---|---|
-| uncompressed | 1,310,720 B | — |
-| `compress: true` | 4,160 B | ~1 ms |
-
-315× smaller for about a millisecond. The saving is not only bandwidth: the payload is chunked
-into 4 KiB pieces that each carry their own escape sequence, so it is also 315× fewer chunks to
-build and for the terminal to reassemble. A photograph would compress far less; the ratio
-follows the picture, not the protocol.
+Anything drawn rather than photographed — a chart, a tilemap, a sprite sheet —
+compresses heavily; a photograph compresses much less.
 
 ## Capability detection
 
@@ -254,20 +255,24 @@ life of the VM. `detect/1` takes an environment map instead and does not cache �
 the one to use for an ssh or multiplexer session, whose environment is not the host's.
 Pass an explicit `protocol:` to override either.
 
-iTerm is deliberately **not** detected as `:kitty` even though it understands kitty's
-transmit-and-display: a kitty image is an overlay rather than cells, and removing one takes
-an explicit delete addressed to its id, which iTerm does not implement. Its own inline-image
-protocol scrolls and disappears with the screen, like text.
+iTerm2 is detected as `:iterm2`, its own inline-image protocol, at every version, even
+though iTerm2 3.5 and later also answers the kitty query: a kitty image is an overlay
+rather than cells, and removing one takes a delete addressed to its id, which iTerm2 does
+not implement, while its inline images scroll and disappear with the screen like text.
+Setting `FRENCH_CURVE_ITERM2=kitty` overrides this and sends iTerm2 kitty frames.
+Animated images of either kind flicker in iTerm2 while its GPU renderer is on and draw
+smoothly with GPU rendering off (Settings → General → Magic).
 
 ### Asking the terminal instead
 
 Environment variables are a guess. `Capability.probe/0` returns the bytes that ask the
 terminal directly (XTVERSION plus primary device attributes); write them, read until
 `probe_complete?/1` is true or your timeout expires, then hand the replies to
-`from_probe/1`:
+`from_probe/1`. `read_until/1` below is the host program's own function over its tty:
 
 ```elixir
-replies = read_until(&FrenchCurve.Capability.probe_complete?/1, IO.write(FrenchCurve.Capability.probe()))
+IO.write(FrenchCurve.Capability.probe())
+replies = read_until(&FrenchCurve.Capability.probe_complete?/1)
 
 protocol = FrenchCurve.Capability.from_probe(replies) || FrenchCurve.Capability.detect()
 ```

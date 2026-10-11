@@ -13,7 +13,7 @@ ERTS_INCLUDE_DIR ?= $(shell erl -noshell -eval 'io:format("~s/include", [code:ro
 DEFLATE_CFLAGS := $(shell pkg-config --cflags libdeflate 2>/dev/null)
 DEFLATE_LIBS := $(shell pkg-config --libs libdeflate 2>/dev/null)
 
-PRIV_DIR = priv
+PRIV_DIR ?= priv
 
 all: $(PRIV_DIR) cells deflate
 

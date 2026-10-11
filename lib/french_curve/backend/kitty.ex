@@ -65,6 +65,7 @@ defmodule FrenchCurve.Backend.Kitty do
     raster
     |> payload(opts)
     |> emit(control)
+    |> IO.iodata_to_binary()
   end
 
   defp named(opts), do: if(opts[:id], do: ",i=#{opts[:id]}", else: "")
@@ -90,13 +91,57 @@ defmodule FrenchCurve.Backend.Kitty do
   belongs on `place/2`.
   """
   @spec transmit(Raster.t(), pos_integer, keyword) :: binary
-  def transmit(%Raster{} = raster, id, opts \\ []) do
-    {width, height} = Raster.dimensions(raster)
-    control = "a=t,i=#{id},f=32,s=#{width},v=#{height},q=2" <> compression(opts)
+  def transmit(%Raster{} = raster, id, opts \\ []),
+    do: raster |> encode(opts) |> transmit_encoded(id) |> IO.iodata_to_binary()
 
-    raster
-    |> payload(opts)
-    |> emit(control)
+  @typedoc "A raster's pixels made ready for `transmit_encoded/2`, under any id."
+  @type encoded :: %{control: String.t(), chunks: [binary]}
+
+  @doc """
+  `raster`'s pixels encoded once for `transmit_encoded/2`, which stores them under an id
+  without encoding them again.
+
+  ## Options
+
+    * `:format` — `:rgba` (default), raw pixels (`f=32`), deflated with `:compress`; or
+      `:png` (`f=100`), a palette PNG (`FrenchCurve.Png.encode_indexed/4`) when the
+      raster has at most 256 colours, else a truecolour one
+    * `:compress` — for `:rgba`, as `transmit/3` takes it; for `:png`, the deflate level,
+      default 6
+  """
+  @spec encode(Raster.t(), keyword) :: encoded
+  def encode(%Raster{} = raster, opts \\ []) do
+    case Keyword.get(opts, :format, :rgba) do
+      :rgba -> rgba_encoded(raster, opts)
+      :png -> png_encoded(raster, opts)
+    end
+  end
+
+  @doc """
+  The sequence that stores `encoded` (`encode/2`) under `id` without displaying it
+  (`a=t`), as `transmit/3` does.
+  """
+  @spec transmit_encoded(encoded, pos_integer) :: iodata
+  def transmit_encoded(%{control: control, chunks: chunks}, id),
+    do: emit(chunks, "a=t,i=#{id}," <> control <> ",q=2")
+
+  defp rgba_encoded(raster, opts) do
+    {width, height} = Raster.dimensions(raster)
+    %{control: "f=32,s=#{width},v=#{height}" <> compression(opts), chunks: payload(raster, opts)}
+  end
+
+  defp png_encoded(raster, opts) do
+    {width, height} = Raster.dimensions(raster)
+    rgba = Raster.to_rgba_binary(raster)
+    level = if is_integer(opts[:compress]), do: opts[:compress], else: 6
+
+    png =
+      case FrenchCurve.Png.encode_indexed(width, height, rgba, level) do
+        {:ok, png} -> png
+        {:error, :too_many_colours} -> FrenchCurve.Png.encode(width, height, rgba)
+      end
+
+    %{control: "f=100", chunks: png |> Base.encode64() |> chunk(@chunk_size)}
   end
 
   @doc """
@@ -172,13 +217,10 @@ defmodule FrenchCurve.Backend.Kitty do
 
   defp compression(opts), do: if(opts[:compress], do: ",o=z", else: "")
 
-  defp emit([only], control) do
-    IO.iodata_to_binary(sequence(control <> ",m=0", only))
-  end
+  defp emit([only], control), do: sequence(control <> ",m=0", only)
 
-  defp emit([first | rest], control) do
-    IO.iodata_to_binary([sequence(control <> ",m=1", first) | continuations(rest)])
-  end
+  defp emit([first | rest], control),
+    do: [sequence(control <> ",m=1", first) | continuations(rest)]
 
   defp continuations([last]), do: [sequence("q=2,m=0", last)]
   defp continuations([part | rest]), do: [sequence("q=2,m=1", part) | continuations(rest)]
@@ -214,7 +256,7 @@ defmodule FrenchCurve.Backend.Kitty do
 
   defp chunk(binary, size) do
     case binary do
-      <<part::binary-size(size), rest::binary>> when byte_size(rest) > 0 ->
+      <<part::binary-size(^size), rest::binary>> when byte_size(rest) > 0 ->
         [part | chunk(rest, size)]
 
       other ->

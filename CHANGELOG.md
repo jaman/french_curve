@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [0.2.0]
 
 ### Breaking changes
 
@@ -9,9 +9,16 @@
 
 ### Added
 
+- `FrenchCurve.Png.encode_indexed/4`: a palette PNG, a byte a pixel, for a buffer of at
+  most 256 colours, else `{:error, :too_many_colours}`.
+- `FrenchCurve.Backend.Kitty.encode/2` and `transmit_encoded/2`: a raster's pixels
+  encoded once and stored under any id without encoding them again; `encode/2` takes
+  `format: :png` (`f=100`), a palette PNG where the raster allows, else a truecolour one.
+  `transmit/3` is unchanged.
+
 - `:cells` protocol and `FrenchCurve.Backend.Cells`: draws a raster as block characters with a foreground and background colour per cell. Glyph sets via `set:` — `:half` (1×2), `:quad` (2×2), `:sextant` (2×3), `:braille` (2×4 dots), `:octant` (2×4). Options `:background` and `:alpha_threshold` (default `128`).
 - `FrenchCurve.Backend.Cells.render/2`, `to_ansi/1`, `glyph/2`, `sets/0`, `subpixels/1`, `available?/0`, and `default_set/1`, which suggests a set from a protocol atom or an environment map (`:sextant` for iTerm2, `:octant` for kitty-protocol terminals, `:half` otherwise).
-- `c_src/cells_nif.c`, a NIF that does the per-cell colour split for `FrenchCurve.Backend.Cells`; pass `native: false` to `render/2` to use the Elixir path.
+- Cell rendering uses a native helper when a C compiler is available at build time; `native: false` on `FrenchCurve.Backend.Cells.render/2` forces the Elixir path.
 - `FrenchCurve.render/3` and `FrenchCurve.to_terminal/3` accept `:cells`; `to_terminal/3` returns the ANSI string. `FrenchCurve.frame/3` returns `nil` for `:cells`, as for `:braille`.
 - `FrenchCurve.Capability.backend(:cells)` returns `FrenchCurve.Backend.Cells`. `:cells` is never returned by `detect/0,1`; name it explicitly.
 - `FrenchCurve.Deflate.compress/1,2`: zlib-format compression through libdeflate (levels `1..12`) when the NIF is built, `:zlib` (levels clamped to `1..9`) otherwise. `FrenchCurve.Deflate.available?/0` reports which is in use.
@@ -21,9 +28,15 @@
 
 ### Changed
 
+- The compiled native code is built into and loaded from
+  `priv/native/<system architecture>` (`FrenchCurve.Native`) instead of `priv/`, so builds
+  for macOS and Linux in one checkout no longer overwrite each other. `mix.exs` passes the
+  folder to `make` as `PRIV_DIR`.
+
+- `FrenchCurve.Raster.to_rgba_binary/1` of a raster with no pixels set returns its
+  background repeated.
 - `FrenchCurve.Capability.placements?/1` is `false` for iTerm2, including when it is detected as `:kitty`, so `FrenchCurve.frame/3` retransmits each frame there instead of placing a stored image.
-- `Makefile`, `Makefile.win`, `c_src` and `CHANGELOG.md` added to the Hex package files.
-- The package description reads "Terminal graphics for Elixir".
+- Packaging: `Makefile`, `Makefile.win`, `c_src` and `CHANGELOG.md` are in the Hex package files, and the package description reads "Terminal graphics for Elixir".
 
 ## [0.1.4]
 

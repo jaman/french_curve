@@ -1,7 +1,7 @@
 defmodule FrenchCurve.MixProject do
   use Mix.Project
 
-  @version "0.1.4"
+  @version "0.2.0"
   @source_url "https://github.com/jaman/french_curve"
 
   def project do
@@ -12,7 +12,9 @@ defmodule FrenchCurve.MixProject do
       compilers: [:elixir_make | Mix.compilers()],
       make_targets: ["all"],
       make_clean: ["clean"],
+      make_env: %{"PRIV_DIR" => "priv/native/#{:erlang.system_info(:system_architecture)}"},
       start_permanent: Mix.env() == :prod,
+      elixirc_options: [warnings_as_errors: true],
       deps: deps(),
       name: "FrenchCurve",
       description: description(),

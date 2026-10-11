@@ -24,10 +24,8 @@ defmodule FrenchCurve.Deflate do
 
   @doc false
   def load_nif do
-    :french_curve
-    |> :code.priv_dir()
-    |> Path.join("deflate_nif")
-    |> to_charlist()
+    "deflate_nif"
+    |> FrenchCurve.Native.path()
     |> :erlang.load_nif(0)
     |> case do
       :ok -> :persistent_term.put({__MODULE__, :native?}, true)
