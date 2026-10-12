@@ -104,12 +104,12 @@ defmodule FrenchCurve.RasterTest do
       assert Raster.to_rgba_binary(finalized) == Raster.to_rgba_binary(raster)
     end
 
-    test "drawing after finalize invalidates the cache and stays correct" do
+    test "drawing after finalize stays correct" do
       raster = Raster.new(2, 1) |> Raster.put_pixel(0, 0, {1, 2, 3, 4}) |> Raster.finalize()
       assert is_binary(raster.rgba)
 
       updated = Raster.put_pixel(raster, 1, 0, {9, 9, 9, 9})
-      assert updated.rgba == nil
+      assert Raster.to_rgba_binary(updated) == <<1, 2, 3, 4, 9, 9, 9, 9>>
       assert Raster.get_pixel(updated, 0, 0) == {1, 2, 3, 4}
       assert Raster.get_pixel(updated, 1, 0) == {9, 9, 9, 9}
     end

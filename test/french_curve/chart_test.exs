@@ -26,7 +26,7 @@ defmodule FrenchCurve.ChartTest do
   test "smoothing still produces a raster of the requested size" do
     raster = Chart.line([0, 3, 1, 4, 2], width: 20, height: 8, smooth: true)
     assert Raster.dimensions(raster) == {20, 8}
-    assert map_size(raster.pixels) > 0
+    assert Enum.any?(List.flatten(Raster.rows(raster)), &(&1 != {0, 0, 0, 0}))
   end
 
   describe "area/2" do
@@ -48,7 +48,7 @@ defmodule FrenchCurve.ChartTest do
           fill_opacity: 0.4
         )
 
-      colors = raster.pixels |> Map.values() |> Enum.uniq()
+      colors = raster |> Raster.rows() |> List.flatten() |> Enum.uniq()
       assert {0, 200, 255, 255} in colors
       assert {0, 80, 102, 255} in colors
     end

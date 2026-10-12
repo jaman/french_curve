@@ -8,6 +8,9 @@ defmodule FrenchCurve.Draw do
   Colours are `{r, g, b, a}` byte tuples written opaquely, with no blending against what
   is already there.
 
+  Outlines are written as one batch of pixels and filled shapes as one batch of
+  horizontal spans, so a call costs one raster update however many pixels it covers.
+
       FrenchCurve.Raster.new(40, 20)
       |> FrenchCurve.Draw.rect({0, 0}, {39, 19}, {80, 80, 80, 255})
       |> FrenchCurve.Draw.fill_circle({20, 10}, 6, {255, 0, 0, 255})
@@ -16,6 +19,7 @@ defmodule FrenchCurve.Draw do
   alias FrenchCurve.Raster
 
   @type coord :: {integer, integer}
+  @type column :: {integer, integer, integer}
 
   @doc """
   Draws a one-pixel-wide line between the two endpoints, both inclusive.
@@ -23,8 +27,8 @@ defmodule FrenchCurve.Draw do
   Handles any direction, including purely horizontal, vertical and single-point lines.
   """
   @spec line(Raster.t(), coord, coord, Raster.color()) :: Raster.t()
-  def line(%Raster{} = raster, {x0, y0}, {x1, y1}, color) do
-    plot_line(raster, x0, y0, x1, y1, color)
+  def line(%Raster{} = raster, from, to, color) do
+    Raster.put_pixels(raster, line_points(from, to), color)
   end
 
   @doc """
@@ -34,18 +38,9 @@ defmodule FrenchCurve.Draw do
   are not closed back to the first one; pass the first point again to close the shape.
   """
   @spec polyline(Raster.t(), [coord], Raster.color()) :: Raster.t()
-  def polyline(%Raster{} = raster, [point], color) do
-    {x, y} = point
-    Raster.put_pixel(raster, x, y, color)
+  def polyline(%Raster{} = raster, points, color) do
+    Raster.put_pixels(raster, polyline_points(points), color)
   end
-
-  def polyline(%Raster{} = raster, [from | [to | _] = rest], color) do
-    raster
-    |> line(from, to, color)
-    |> polyline(rest, color)
-  end
-
-  def polyline(%Raster{} = raster, [], _color), do: raster
 
   @doc """
   Draws the four edges of the rectangle spanned by two opposite corners.
@@ -57,11 +52,11 @@ defmodule FrenchCurve.Draw do
     {left, right} = min_max(x0, x1)
     {top, bottom} = min_max(y0, y1)
 
-    raster
-    |> line({left, top}, {right, top}, color)
-    |> line({left, bottom}, {right, bottom}, color)
-    |> line({left, top}, {left, bottom}, color)
-    |> line({right, top}, {right, bottom}, color)
+    polyline(
+      raster,
+      [{left, top}, {right, top}, {right, bottom}, {left, bottom}, {left, top}],
+      color
+    )
   end
 
   @doc """
@@ -73,10 +68,21 @@ defmodule FrenchCurve.Draw do
   def fill_rect(%Raster{} = raster, {x0, y0}, {x1, y1}, color) do
     {left, right} = min_max(x0, x1)
     {top, bottom} = min_max(y0, y1)
+    Raster.fill_spans(raster, for(y <- top..bottom, do: {y, left, right}), color)
+  end
 
-    for x <- left..right, y <- top..bottom, reduce: raster do
-      acc -> Raster.put_pixel(acc, x, y, color)
-    end
+  @doc """
+  Fills vertical columns, each `{x, y_from, y_to}` with both ends inclusive and in either
+  order.
+
+  Columns may repeat an `x` or overlap; the union is filled. The columns are written as
+  horizontal spans in one raster update.
+  """
+  @spec fill_columns(Raster.t(), [column], Raster.color()) :: Raster.t()
+  def fill_columns(%Raster{} = raster, [], _color), do: raster
+
+  def fill_columns(%Raster{} = raster, columns, color) do
+    Raster.fill_spans(raster, columns_to_spans(columns), color)
   end
 
   @doc """
@@ -96,20 +102,69 @@ defmodule FrenchCurve.Draw do
     edges = Enum.zip(points, tl(points) ++ [hd(points)])
     {top, bottom} = points |> Enum.map(&elem(&1, 1)) |> Enum.min_max()
 
-    filled =
-      Enum.reduce(floor(top)..ceil(bottom)//1, raster, fn y, acc ->
-        centre = y + 0.5
+    spans =
+      for y <- floor(top)..ceil(bottom)//1,
+          [from, to] <- row_crossings(edges, y + 0.5) do
+        {y, round(from), round(to - 0.0001)}
+      end
 
-        edges
-        |> Enum.flat_map(&crossing(&1, centre))
-        |> Enum.sort()
-        |> Enum.chunk_every(2, 2, :discard)
-        |> Enum.reduce(acc, fn [from, to], row ->
-          line(row, {round(from), y}, {round(to - 0.0001), y}, color)
-        end)
-      end)
+    raster
+    |> Raster.fill_spans(spans, color)
+    |> polyline(Enum.map(points ++ [hd(points)], &round_point/1), color)
+  end
 
-    polyline(filled, Enum.map(points ++ [hd(points)], &round_point/1), color)
+  @doc """
+  Draws a one-pixel-wide circle outline of `radius` pixels around the centre `{cx, cy}`.
+
+  `radius` must be a non-negative integer. The interior is untouched.
+  """
+  @spec circle(Raster.t(), coord, non_neg_integer, Raster.color()) :: Raster.t()
+  def circle(%Raster{} = raster, {cx, cy}, radius, color) do
+    Raster.put_pixels(raster, circle_points(cx, cy, 0, radius, 1 - radius, []), color)
+  end
+
+  @doc """
+  Fills a disc of `radius` pixels around the centre `{cx, cy}`.
+
+  `radius` must be a non-negative integer.
+  """
+  @spec fill_circle(Raster.t(), coord, non_neg_integer, Raster.color()) :: Raster.t()
+  def fill_circle(%Raster{} = raster, {cx, cy}, radius, color) do
+    spans =
+      for dy <- -radius..radius//1 do
+        half = round(:math.sqrt(max(0, radius * radius - dy * dy)))
+        {cy + dy, cx - half, cx + half}
+      end
+
+    Raster.fill_spans(raster, spans, color)
+  end
+
+  @doc """
+  Returns the pixels of the one-pixel-wide line between two endpoints, both inclusive,
+  in walking order from `from` to `to`.
+  """
+  @spec line_points(coord, coord) :: [coord]
+  def line_points({x0, y0}, {x1, y1}) do
+    deltas = {abs(x1 - x0), -abs(y1 - y0)}
+    steps = {step(x0, x1), step(y0, y1)}
+    {dx, dy} = deltas
+    walk({x0, y0}, {x1, y1}, deltas, steps, dx + dy, [])
+  end
+
+  defp polyline_points([]), do: []
+  defp polyline_points([point]), do: [point]
+
+  defp polyline_points(points) do
+    points
+    |> Enum.chunk_every(2, 1, :discard)
+    |> Enum.flat_map(fn [from, to] -> line_points(from, to) end)
+  end
+
+  defp row_crossings(edges, centre) do
+    edges
+    |> Enum.flat_map(&crossing(&1, centre))
+    |> Enum.sort()
+    |> Enum.chunk_every(2, 2, :discard)
   end
 
   defp crossing({{x0, y0}, {x1, y1}}, y) do
@@ -120,48 +175,54 @@ defmodule FrenchCurve.Draw do
     end
   end
 
+  defp columns_to_spans(columns) do
+    covered =
+      Enum.reduce(columns, %{}, fn {x, y0, y1}, acc ->
+        {top, bottom} = min_max(y0, y1)
+        Map.update(acc, x, {top, bottom}, fn {t, b} -> {min(t, top), max(b, bottom)} end)
+      end)
+
+    xs = covered |> Map.keys() |> Enum.sort()
+
+    {top, bottom} =
+      covered |> Map.values() |> Enum.reduce(fn {t, b}, {lo, hi} -> {min(t, lo), max(b, hi)} end)
+
+    for y <- top..bottom//1,
+        run <- row_runs(xs, covered, y) do
+      run
+    end
+  end
+
+  defp row_runs(xs, covered, y) do
+    xs
+    |> Enum.filter(fn x -> covers?(Map.fetch!(covered, x), y) end)
+    |> Enum.chunk_while(nil, &extend_run(&1, &2, y), &close_run/1)
+  end
+
+  defp covers?({top, bottom}, y), do: top <= y and y <= bottom
+
+  defp extend_run(x, nil, y), do: {:cont, {y, x, x}}
+  defp extend_run(x, {y, from, to}, y) when x == to + 1, do: {:cont, {y, from, x}}
+  defp extend_run(x, run, y), do: {:cont, run, {y, x, x}}
+
+  defp close_run(nil), do: {:cont, nil}
+  defp close_run(run), do: {:cont, run, nil}
+
   defp round_point({x, y}), do: {round(x), round(y)}
 
-  @doc """
-  Draws a one-pixel-wide circle outline of `radius` pixels around the centre `{cx, cy}`.
+  defp circle_points(_cx, _cy, x, y, _err, acc) when x > y, do: acc
 
-  `radius` must be a non-negative integer. The interior is untouched.
-  """
-  @spec circle(Raster.t(), coord, non_neg_integer, Raster.color()) :: Raster.t()
-  def circle(%Raster{} = raster, {cx, cy}, radius, color) do
-    plot_circle(raster, cx, cy, radius, 0, radius, 1 - radius, color)
+  defp circle_points(cx, cy, x, y, err, acc) do
+    acc = octants(cx, cy, x, y) ++ acc
+
+    if err < 0 do
+      circle_points(cx, cy, x + 1, y, err + 2 * (x + 1) + 1, acc)
+    else
+      circle_points(cx, cy, x + 1, y - 1, err + 2 * (x + 1) - 2 * (y - 1) + 1, acc)
+    end
   end
 
-  @doc """
-  Fills a disc of `radius` pixels around the centre `{cx, cy}`.
-
-  `radius` must be a non-negative integer.
-  """
-  @spec fill_circle(Raster.t(), coord, non_neg_integer, Raster.color()) :: Raster.t()
-  def fill_circle(%Raster{} = raster, {cx, cy}, radius, color) do
-    Enum.reduce(-radius..radius//1, raster, fn dy, acc ->
-      half = round(:math.sqrt(max(0, radius * radius - dy * dy)))
-      line(acc, {cx - half, cy + dy}, {cx + half, cy + dy}, color)
-    end)
-  end
-
-  defp plot_circle(raster, _cx, _cy, _radius, x, y, _err, _color) when x > y, do: raster
-
-  defp plot_circle(raster, cx, cy, radius, x, y, err, color) do
-    raster
-    |> octants(cx, cy, x, y, color)
-    |> plot_circle_next(cx, cy, radius, x, y, err, color)
-  end
-
-  defp plot_circle_next(raster, cx, cy, radius, x, y, err, color) when err < 0 do
-    plot_circle(raster, cx, cy, radius, x + 1, y, err + 2 * (x + 1) + 1, color)
-  end
-
-  defp plot_circle_next(raster, cx, cy, radius, x, y, err, color) do
-    plot_circle(raster, cx, cy, radius, x + 1, y - 1, err + 2 * (x + 1) - 2 * (y - 1) + 1, color)
-  end
-
-  defp octants(raster, cx, cy, x, y, color) do
+  defp octants(cx, cy, x, y) do
     [
       {cx + x, cy + y},
       {cx - x, cy + y},
@@ -172,26 +233,15 @@ defmodule FrenchCurve.Draw do
       {cx + y, cy - x},
       {cx - y, cy - x}
     ]
-    |> Enum.reduce(raster, fn {px, py}, acc -> Raster.put_pixel(acc, px, py, color) end)
   end
 
-  defp plot_line(raster, x0, y0, x1, y1, color) do
-    deltas = {abs(x1 - x0), -abs(y1 - y0)}
-    steps = {step(x0, x1), step(y0, y1)}
-    {dx, dy} = deltas
-    walk(raster, {x0, y0}, {x1, y1}, deltas, steps, dx + dy, color)
-  end
+  defp walk({x, y}, {x, y}, _deltas, _steps, _err, acc), do: Enum.reverse([{x, y} | acc])
 
-  defp walk(raster, {x, y}, {x, y}, _deltas, _steps, _err, color) do
-    Raster.put_pixel(raster, x, y, color)
-  end
-
-  defp walk(raster, {x, y}, target, {dx, dy} = deltas, {sx, sy} = steps, err, color) do
-    raster = Raster.put_pixel(raster, x, y, color)
+  defp walk({x, y}, target, {dx, dy} = deltas, {sx, sy} = steps, err, acc) do
     e2 = 2 * err
-    {x, err} = advance(x, sx, err, dy, e2 >= dy)
-    {y, err} = advance(y, sy, err, dx, e2 <= dx)
-    walk(raster, {x, y}, target, deltas, steps, err, color)
+    {next_x, err} = advance(x, sx, err, dy, e2 >= dy)
+    {next_y, err} = advance(y, sy, err, dx, e2 <= dx)
+    walk({next_x, next_y}, target, deltas, steps, err, [{x, y} | acc])
   end
 
   defp advance(value, step, err, delta, true), do: {value + step, err + delta}

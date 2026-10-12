@@ -3,14 +3,16 @@ defmodule FrenchCurve.Raster do
   A fixed-size RGBA pixel buffer, the value every drawing and backend function operates on.
 
   A raster has a `width`, a `height`, a `background` colour returned for any pixel never
-  written, and two interchangeable representations of its contents:
+  written, and its contents in two layers:
 
-    * `pixels` — a sparse map of `{x, y}` to colour, cheap to draw into
-    * `rgba` — a dense row-major `width * height * 4` byte buffer, what the backends send
+    * `rgba` — a dense row-major `width * height * 4` byte base buffer, or `nil` when every
+      base pixel is the background
+    * `pixels` — a sparse map of `{x, y}` to colour written over the base
 
-  `get_pixel/3` reads from whichever is populated, so the representation is not something
-  a caller has to track. `finalize/1` caches the dense buffer on a raster that is about to
-  be sent repeatedly; drawing into a finalized raster discards the cache.
+  `get_pixel/3` reads the top layer first, so the layering is not something a caller has
+  to track. `put_pixel/4` and `put_pixels/3` write into `pixels`; `fill_spans/3` writes
+  whole horizontal runs straight into the base buffer, which is the fast way to fill
+  large areas. `finalize/1` folds the map into the base buffer.
 
   Coordinates are zero-based with `{0, 0}` at the top left. Writes outside the bounds are
   dropped rather than raising.
@@ -24,6 +26,7 @@ defmodule FrenchCurve.Raster do
   @type color :: {channel, channel, channel, channel}
   @type color_rgb :: {channel, channel, channel}
   @type point :: {non_neg_integer, non_neg_integer}
+  @type span :: {integer, integer, integer}
   @type t :: %__MODULE__{
           width: pos_integer,
           height: pos_integer,
@@ -78,55 +81,77 @@ defmodule FrenchCurve.Raster do
 
   `color` is an `{r, g, b, a}` tuple of bytes and replaces whatever was there; there is no
   alpha blending. Coordinates outside the bounds are ignored and the raster is returned
-  unchanged. A raster holding a cached dense buffer loses that cache here.
+  unchanged.
   """
   @spec put_pixel(t, integer, integer, color) :: t
   def put_pixel(%__MODULE__{} = raster, x, y, color) do
     if in_bounds?(raster, x, y) do
-      raster |> materialize() |> put_color(x, y, color)
+      %{raster | pixels: Map.put(raster.pixels, {x, y}, color)}
     else
       raster
     end
   end
 
-  defp put_color(raster, x, y, color) do
-    %{raster | pixels: Map.put(raster.pixels, {x, y}, color)}
+  @doc """
+  Returns `raster` with every `{x, y}` in `points` set to `color`.
+
+  Equivalent to `put_pixel/4` for each point, in one map merge. Points outside the bounds
+  are ignored.
+  """
+  @spec put_pixels(t, [{integer, integer}], color) :: t
+  def put_pixels(%__MODULE__{} = raster, points, color) do
+    inside = Enum.filter(points, fn {x, y} -> in_bounds?(raster, x, y) end)
+    %{raster | pixels: Map.merge(raster.pixels, Map.from_keys(inside, color))}
   end
 
-  defp materialize(%__MODULE__{rgba: nil} = raster), do: raster
+  @doc """
+  Returns `raster` with every horizontal span in `spans` filled with `color`.
 
-  defp materialize(%__MODULE__{rgba: rgba, pixels: pixels, width: width} = raster)
-       when map_size(pixels) == 0 do
-    %{raster | pixels: build_pixels(rgba, width), rgba: nil}
+  Each span is `{y, x_from, x_to}`, both ends inclusive and in either order. Spans are
+  clipped to the raster and may overlap. Pending `put_pixel/4` writes are folded into the
+  base buffer first, so the spans land on top of everything drawn before them. A `color`
+  that is not an `{r, g, b, a}` tuple is written pixel by pixel as `put_pixels/3` does.
+  """
+  @spec fill_spans(t, [span], color | term) :: t
+  def fill_spans(%__MODULE__{} = raster, spans, {r, g, b, a}) do
+    runs =
+      spans
+      |> Enum.flat_map(&clip_span(raster, &1))
+      |> Enum.sort()
+      |> merge_runs()
+
+    case runs do
+      [] ->
+        raster
+
+      runs ->
+        base = to_rgba_binary(raster)
+        %{raster | rgba: splice_fill(base, runs, <<r, g, b, a>>), pixels: %{}}
+    end
   end
 
-  defp materialize(%__MODULE__{} = raster), do: %{raster | rgba: nil}
+  def fill_spans(%__MODULE__{} = raster, spans, color) do
+    points =
+      for {y, x0, x1} <- spans,
+          x <- min(x0, x1)..max(x0, x1)//1,
+          do: {x, y}
+
+    put_pixels(raster, points, color)
+  end
 
   @doc """
   Returns the `t:color/0` at `{x, y}`.
 
-  Reads a written pixel first, then the cached dense buffer, and falls back to the
-  raster's `background`. Out-of-bounds coordinates return the background rather than
-  raising.
+  Reads a written pixel first, then the base buffer, and falls back to the raster's
+  `background`. Out-of-bounds coordinates return the background rather than raising.
   """
   @spec get_pixel(t, integer, integer) :: color
   def get_pixel(%__MODULE__{} = raster, x, y) do
     case Map.get(raster.pixels, {x, y}) do
-      nil -> cached_pixel(raster, x, y)
+      nil -> base_pixel(raster, x, y)
       color -> color
     end
   end
-
-  defp cached_pixel(%__MODULE__{rgba: rgba, width: width} = raster, x, y) when is_binary(rgba) do
-    if in_bounds?(raster, x, y) do
-      <<r, g, b, a>> = binary_part(rgba, (y * width + x) * 4, 4)
-      {r, g, b, a}
-    else
-      raster.background
-    end
-  end
-
-  defp cached_pixel(%__MODULE__{} = raster, _x, _y), do: raster.background
 
   @doc """
   Returns the `{width, height}` rectangle of `raster` whose top left is at `{x, y}`.
@@ -156,10 +181,11 @@ defmodule FrenchCurve.Raster do
   """
   @spec rows(t) :: [[color]]
   def rows(%__MODULE__{width: width, height: height} = raster) do
+    buffer = to_rgba_binary(raster)
+    stride = width * 4
+
     for y <- 0..(height - 1) do
-      for x <- 0..(width - 1) do
-        get_pixel(raster, x, y)
-      end
+      for <<r, g, b, a <- binary_part(buffer, y * stride, stride)>>, do: {r, g, b, a}
     end
   end
 
@@ -167,37 +193,41 @@ defmodule FrenchCurve.Raster do
   Returns the raster as a dense row-major RGBA buffer.
 
   The result is exactly `width * height * 4` bytes, four bytes per pixel in red, green,
-  blue, alpha order, rows top to bottom. Returns the cached buffer when one is present.
+  blue, alpha order, rows top to bottom.
   """
   @spec to_rgba_binary(t) :: binary
-  def to_rgba_binary(%__MODULE__{rgba: rgba}) when is_binary(rgba), do: rgba
+  def to_rgba_binary(%__MODULE__{pixels: pixels} = raster) when map_size(pixels) == 0,
+    do: base_binary(raster)
 
-  def to_rgba_binary(%__MODULE__{pixels: pixels, background: {r, g, b, a}} = raster)
-      when map_size(pixels) == 0,
-      do: :binary.copy(<<r, g, b, a>>, raster.width * raster.height)
+  def to_rgba_binary(%__MODULE__{width: width, pixels: pixels} = raster) do
+    runs =
+      pixels
+      |> Enum.map(fn {{x, y}, {r, g, b, a}} -> {y * width + x, <<r, g, b, a>>} end)
+      |> Enum.sort()
 
-  def to_rgba_binary(%__MODULE__{} = raster) do
-    for row <- rows(raster), {r, g, b, a} <- row, into: <<>>, do: <<r, g, b, a>>
+    splice_pixels(base_binary(raster), runs)
   end
 
   @doc """
-  Returns `raster` with its dense RGBA buffer computed and cached in the `rgba` field.
+  Returns `raster` with its pixel map folded into the dense base buffer.
 
   Pixel values are unchanged. Call this on a raster that will be sent to a backend more
-  than once; a raster that already carries a cache is returned as is. `put_pixel/4` after
-  `finalize/1` drops the cache, so finalize last.
+  than once, so `to_rgba_binary/1` returns the buffer without rebuilding it. Drawing
+  after `finalize/1` stays correct.
   """
   @spec finalize(t) :: t
-  def finalize(%__MODULE__{rgba: rgba} = raster) when is_binary(rgba), do: raster
-  def finalize(%__MODULE__{} = raster), do: %{raster | rgba: to_rgba_binary(raster)}
+  def finalize(%__MODULE__{rgba: rgba, pixels: pixels} = raster)
+      when is_binary(rgba) and map_size(pixels) == 0,
+      do: raster
+
+  def finalize(%__MODULE__{} = raster), do: %{raster | rgba: to_rgba_binary(raster), pixels: %{}}
 
   @doc """
   Builds a raster from an existing dense RGBA buffer.
 
   `binary` must be exactly `width * height * 4` bytes, four bytes per pixel in red,
   green, blue, alpha order and rows top to bottom; a mismatched size raises
-  `FunctionClauseError`. The buffer is kept as the raster's cache rather than expanded,
-  so this is the cheap way to load pixels produced elsewhere.
+  `FunctionClauseError`. The buffer becomes the raster's base without being copied.
 
   ## Options
 
@@ -216,17 +246,63 @@ defmodule FrenchCurve.Raster do
     }
   end
 
-  defp build_pixels(binary, width) do
-    colors = for <<r, g, b, a <- binary>>, do: {r, g, b, a}
+  defp base_pixel(%__MODULE__{rgba: rgba, width: width} = raster, x, y) when is_binary(rgba) do
+    if in_bounds?(raster, x, y) do
+      <<r, g, b, a>> = binary_part(rgba, (y * width + x) * 4, 4)
+      {r, g, b, a}
+    else
+      raster.background
+    end
+  end
 
-    colors
-    |> Enum.with_index()
-    |> Enum.reduce(%{}, fn {color, index}, acc ->
-      if color == @transparent do
-        acc
-      else
-        Map.put(acc, {rem(index, width), div(index, width)}, color)
-      end
-    end)
+  defp base_pixel(%__MODULE__{} = raster, _x, _y), do: raster.background
+
+  defp base_binary(%__MODULE__{rgba: rgba}) when is_binary(rgba), do: rgba
+
+  defp base_binary(%__MODULE__{background: {r, g, b, a}, width: width, height: height}),
+    do: :binary.copy(<<r, g, b, a>>, width * height)
+
+  defp clip_span(%__MODULE__{width: width, height: height}, {y, x0, x1}) do
+    left = max(min(x0, x1), 0)
+    right = min(max(x0, x1), width - 1)
+
+    if y >= 0 and y < height and left <= right,
+      do: [{y * width + left, y * width + right}],
+      else: []
+  end
+
+  defp merge_runs([]), do: []
+
+  defp merge_runs([first | rest]),
+    do: rest |> Enum.reduce([first], &merge_run/2) |> Enum.reverse()
+
+  defp merge_run({from, to}, [{last_from, last_to} | done]) when from <= last_to + 1,
+    do: [{last_from, max(to, last_to)} | done]
+
+  defp merge_run(run, done), do: [run | done]
+
+  defp splice_fill(base, runs, pixel) do
+    {parts, position} =
+      Enum.reduce(runs, {[], 0}, fn {from, to}, {parts, position} ->
+        gap = binary_part(base, position * 4, (from - position) * 4)
+        {[:binary.copy(pixel, to - from + 1), gap | parts], to + 1}
+      end)
+
+    finish_splice(base, parts, position)
+  end
+
+  defp splice_pixels(base, runs) do
+    {parts, position} =
+      Enum.reduce(runs, {[], 0}, fn {index, pixel}, {parts, position} ->
+        gap = binary_part(base, position * 4, (index - position) * 4)
+        {[pixel, gap | parts], index + 1}
+      end)
+
+    finish_splice(base, parts, position)
+  end
+
+  defp finish_splice(base, parts, position) do
+    tail = binary_part(base, position * 4, byte_size(base) - position * 4)
+    IO.iodata_to_binary(Enum.reverse([tail | parts]))
   end
 end

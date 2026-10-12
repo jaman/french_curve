@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.2.1]
+
+### Added
+
+- `FrenchCurve.Raster.fill_spans/3`: fills horizontal runs straight into the dense buffer in one splice. `put_pixels/3` writes many pixels in one map merge.
+- `FrenchCurve.Draw.fill_columns/3` fills vertical columns as row spans; `FrenchCurve.Draw.line_points/2` returns a line's pixels.
+
+### Changed
+
+- A raster is a dense base buffer with a map of single-pixel writes over it. `put_pixel/4` no longer expands a buffer-backed raster into a map, `finalize/1` folds the map into the buffer, and `to_rgba_binary/1` and `rows/1` splice instead of reading every pixel through `get_pixel/3`.
+- `Draw` writes each shape in one raster update and `Chart.area/2` fills with spans. Output is byte-identical; a 480×192 area chart draws in about 4.6 ms (was 17 ms) and converts to RGBA in 0.3 ms (was 9.3 ms).
+
 ## [0.2.0]
 
 ### Breaking changes

@@ -123,18 +123,20 @@ defmodule FrenchCurve.Chart do
   defp maybe_smooth(points, true), do: Curve.catmull_rom(points)
 
   defp fill_area(raster, points, baseline, color) do
-    points
-    |> Enum.chunk_every(2, 1, :discard)
-    |> Enum.reduce(raster, fn [a, b], acc -> fill_span(acc, a, b, baseline, color) end)
+    columns =
+      points
+      |> Enum.chunk_every(2, 1, :discard)
+      |> Enum.flat_map(fn [a, b] -> segment_columns(a, b, baseline) end)
+
+    Draw.fill_columns(raster, columns, color)
   end
 
-  defp fill_span(raster, {x1, y1}, {x2, y2}, baseline, color) do
+  defp segment_columns({x1, y1}, {x2, y2}, baseline) do
     {xa, ya, xb, yb} = order(x1, y1, x2, y2)
 
-    Enum.reduce(round(xa)..round(xb), raster, fn column, acc ->
-      top = round(interpolate(xa, ya, xb, yb, column))
-      Draw.line(acc, {column, top}, {column, baseline}, color)
-    end)
+    for column <- round(xa)..round(xb) do
+      {column, round(interpolate(xa, ya, xb, yb, column)), baseline}
+    end
   end
 
   defp order(x1, y1, x2, y2) when x1 <= x2, do: {x1, y1, x2, y2}
