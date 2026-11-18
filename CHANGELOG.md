@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- A `static` target in the Makefile builds the cells NIF as a static archive for `cauldron_mobile`.
+
 ## [0.2.1]
 
 ### Added

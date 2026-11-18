@@ -25,3 +25,9 @@ french_curve-*.tar
 /priv/*.so
 /priv/*.dSYM/
 /priv/native/
+
+# Windows and macOS link artefacts from the NIF build.
+/priv/*.lib
+/priv/*.pdb
+/priv/*.exp
+/priv/*.dylib

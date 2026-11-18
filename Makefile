@@ -37,8 +37,19 @@ endif
 $(PRIV_DIR):
 	mkdir -p $(PRIV_DIR)
 
+STATIC_DIR ?= priv/static
+
+static: $(STATIC_DIR)/cells_nif.a
+
+$(STATIC_DIR)/%.a: c_src/%.c | $(STATIC_DIR)
+	$(CC) $(CFLAGS) -DSTATIC_ERLANG_NIF_LIBNAME=$* -I$(ERTS_INCLUDE_DIR) -c -o $(STATIC_DIR)/$*.o $<
+	$(AR) rcs $@ $(STATIC_DIR)/$*.o
+
+$(STATIC_DIR):
+	mkdir -p $(STATIC_DIR)
+
 clean:
 	rm -f $(PRIV_DIR)/*.so $(PRIV_DIR)/*.tmp
 	rm -rf $(PRIV_DIR)/*.tmp.dSYM
 
-.PHONY: all cells deflate clean
+.PHONY: all cells deflate static clean
